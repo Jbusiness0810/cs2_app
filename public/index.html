@@ -166,6 +166,9 @@
   .price-row a::after { content: ' \2197'; font-size: 10px; color: var(--muted); }
   .price-row a:hover { color: var(--gold); text-decoration-color: var(--gold); }
   .price-row.best a { color: #6ee26e; }
+  .price-row.ref .src { color: #566d84; }
+  .price-row.ref a { color: var(--muted); font-weight: 500; }
+  .price-row.ref a:hover { color: var(--gold); }
   a.itemlink { color: inherit; text-decoration: none; display: block; }
   a.itemlink:hover .name { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
   .pop { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
@@ -224,7 +227,7 @@ const TIERS = [
   { min: 5,  name: 'Mil-Spec', color: 'var(--milspec)' },
   { min: 0,  name: 'Consumer', color: 'var(--consumer)' },
 ];
-const SOURCE_LABEL = { dmarket: 'DMarket', skinport: 'Skinport' };
+const SOURCE_LABEL = { dmarket: 'DMarket', skinport: 'Skinport', csfloat: 'CSFloat' };
 const POP_LABELS = ['Dead', 'Very low', 'Low', 'Moderate', 'High', 'Very high'];
 const METER_MAX = 40; // discount percent that pins the meter at the far end
 
@@ -281,6 +284,11 @@ function render() {
       <div class="price-row ${l.source === it.bestSource ? 'best' : ''}">
         <span class="src">${SOURCE_LABEL[l.source] || esc(l.source)}</span>
         <a href="${esc(l.url)}" target="_blank" rel="noopener" title="Open this listing on ${SOURCE_LABEL[l.source] || esc(l.source)}">${fmtUsd(l.price)}</a>
+      </div>`).join('')
+      + (it.refs || []).map(r => `
+      <div class="price-row ref">
+        <span class="src">${esc(r.label)}</span>
+        <a href="${esc(r.url)}" target="_blank" rel="noopener" title="Reference price, open on ${esc(r.label)}">${fmtUsd(r.price)}</a>
       </div>`).join('');
     const pop = it.popularity || { score: 0, basis: 'none' };
     const popBars = [1,2,3,4,5].map(i => `<i class="${i <= pop.score ? 'on' : ''}"></i>`).join('');
@@ -306,7 +314,8 @@ function render() {
         <div class="prices">${rows}</div>
         <div class="foot">
           <span class="discount">${it.discount.toFixed(1)}% off</span>
-          <span>${it.suggestedPrice ? 'vs ' + fmtUsd(it.suggestedPrice) : it.crossListed ? 'spread ' + fmtUsd(it.spread) : ''}</span>
+          <span>${it.float !== null && it.float !== undefined ? 'float ' + it.float.toFixed(4) : ''}</span>
+          <span>${it.suggestedPrice > it.bestPrice ? 'vs ' + fmtUsd(it.suggestedPrice) : it.crossListed ? 'spread ' + fmtUsd(it.spread) : ''}</span>
         </div>
       </div>
     </div>`;
@@ -315,18 +324,18 @@ function render() {
 
 function setStatus(data) {
   const el = document.getElementById('status');
-  const dm = data.sources.dmarket.ok;
-  const sp = data.sources.skinport.ok;
+  const enabled = Object.entries(data.sources).filter(([, s]) => s.enabled !== false);
+  const up = enabled.filter(([, s]) => s.ok).map(([k]) => SOURCE_LABEL[k] || k);
   const n = data.items.length;
   const tag = data.mock ? 'MOCK DATA' : 'LIVE';
-  if (dm && sp) {
-    el.textContent = `${tag} - DMarket + Skinport | ${n} items`;
+  if (up.length === enabled.length && up.length > 0) {
+    el.textContent = `${tag} - ${up.join(' + ')} | ${n} items`;
     el.className = data.mock ? 'partial' : 'live';
-  } else if (dm || sp) {
-    el.textContent = `${tag} - ${dm ? 'DMarket' : 'Skinport'} only | ${n} items`;
+  } else if (up.length > 0) {
+    el.textContent = `${tag} - ${up.join(' + ')} only | ${n} items`;
     el.className = 'partial';
   } else {
-    el.textContent = 'OFFLINE - both sources failed, retrying in 60s';
+    el.textContent = 'OFFLINE - all sources failed, retrying in 60s';
     el.className = 'down';
   }
 }

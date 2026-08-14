@@ -1,0 +1,22 @@
+{
+  "AK-47 | Redline (Field-Tested)": {
+    "steam": { "last_24h": 55.2, "last_7d": 54.8, "last_30d": 54.1, "last_90d": 53.0 },
+    "buff163": { "starting_at": { "price": 56.8 }, "highest_order": { "price": 52.1 } }
+  },
+  "AWP | Asiimov (Well-Worn)": {
+    "steam": { "last_24h": 118.0, "last_7d": 116.4, "last_30d": 115.2, "last_90d": 112.9 },
+    "buff163": { "starting_at": { "price": 120.5 }, "highest_order": { "price": 110.2 } }
+  },
+  "USP-S | Kill Confirmed (Field-Tested)": {
+    "steam": { "last_24h": 66.5, "last_7d": 65.9, "last_30d": 64.8, "last_90d": 63.1 },
+    "buff163": { "starting_at": { "price": 68.0 }, "highest_order": { "price": 61.5 } }
+  },
+  "Karambit | Tiger Tooth (Factory New)": {
+    "steam": { "last_24h": 1400.0, "last_7d": 1392.5, "last_30d": 1385.0, "last_90d": 1360.0 },
+    "buff163": { "starting_at": { "price": 1380.0 }, "highest_order": { "price": 1290.0 } }
+  },
+  "M4A1-S | Hyper Beast (Minimal Wear)": {
+    "steam": { "last_24h": 31.5, "last_7d": 31.0, "last_30d": 30.6, "last_90d": 29.8 },
+    "buff163": { "starting_at": { "price": 30.9 }, "highest_order": { "price": 27.5 } }
+  }
+}

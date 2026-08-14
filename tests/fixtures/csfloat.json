@@ -1,0 +1,32 @@
+[
+  {
+    "id": "cf-001",
+    "price": 5175,
+    "reference": { "predicted_price": 7650, "base_price": 7500 },
+    "item": {
+      "market_hash_name": "AK-47 | Redline (Field-Tested)",
+      "float_value": 0.2612,
+      "icon_url": "mock/ak47-redline-icon"
+    }
+  },
+  {
+    "id": "cf-002",
+    "price": 135000,
+    "reference": { "predicted_price": 152000, "base_price": 150000 },
+    "item": {
+      "market_hash_name": "Karambit | Tiger Tooth (Factory New)",
+      "float_value": 0.018,
+      "icon_url": "mock/karambit-tigertooth-icon"
+    }
+  },
+  {
+    "id": "cf-003",
+    "price": 11640,
+    "reference": { "predicted_price": 14200, "base_price": 14000 },
+    "item": {
+      "market_hash_name": "AWP | Asiimov (Well-Worn)",
+      "float_value": 0.4419,
+      "icon_url": "mock/awp-asiimov-icon"
+    }
+  }
+]

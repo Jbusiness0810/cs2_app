@@ -1,6 +1,6 @@
 # CS2 Deal Finder
 
-A local web app that finds the best CS2 skin deals by comparing live prices across DMarket and Skinport. Node/Express server acting as an API proxy with a 5 minute cache, plus a static HTML/JS frontend.
+A local web app that finds the best CS2 skin deals by comparing live prices across DMarket, Skinport, and optionally CSFloat, with Steam and Buff163 reference prices for context. Node/Express server acting as an API proxy with a 5 minute cache, plus a static HTML/JS frontend.
 
 ## Structure
 
@@ -21,6 +21,17 @@ node server.js
 ```
 
 Then open http://localhost:3000. The status bar should show "LIVE - DMarket + Skinport" with a real item count once both sources answer.
+
+## Optional: CSFloat as a third source
+
+CSFloat has a proper listings API with float values but requires a free API key, generated in your CSFloat profile under the developer tab. Set it before starting the server and CSFloat joins the merge automatically:
+
+```powershell
+$env:CSFLOAT_API_KEY = "your-key-here"
+node server.js
+```
+
+On mac or Linux: `CSFLOAT_API_KEY=your-key-here node server.js`. Without the key the app runs on two sources and prints a reminder at startup.
 
 ## Mock mode
 
@@ -46,6 +57,8 @@ Boots the server in mock mode and asserts the /api/deals response shape, the cro
 - The cheapest source wins per item. Discount is computed against the suggested price, falling back to the highest listed price when no suggested price exists.
 - Results are cached for 5 minutes. Skinport rate limits to roughly 1 request per 5 minutes per IP, so never remove the cache.
 - Deals are graded with CS2 rarity tiers: Consumer (0%+), Mil-Spec (5%+), Restricted (12%+), Classified (20%+), Covert (30%+).
+- Aggregated reference prices come from the CSGOTrader price dataset (one fetch, cached 6 hours): each card shows Steam and Buff163 reference rows with links, and the discount falls back to the Buff163 then Steam reference when a marketplace publishes no suggested price. Live per-item Steam priceoverview calls were deliberately skipped, they get IPs rate banned fast and the aggregated dataset already covers Steam prices.
+- Float values show on cards when DMarket or CSFloat provides them.
 - Every item gets a 0 to 5 popularity rating from Skinport 7-day sales volume (refreshed every 30 minutes), falling back to total listing counts when an item has no sales history.
 - Images come from DMarket when available, with a fallback to Steam CDN images resolved through the ByMykel/CSGO-API market hash name dataset (refreshed daily), so Skinport-only items get pictures too. Items missing from both show a "NO PREVIEW" placeholder.
 - The card image, the item name, and every price are links to the live marketplace listing.

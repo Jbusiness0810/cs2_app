@@ -1,7 +1,8 @@
 // CS2 Deal Finder server
-// Proxies and merges live prices from DMarket and Skinport, caches for 5 minutes.
-// Node 18+ required (global fetch). MOCK_DATA=1 serves bundled fixtures instead
-// of hitting the live APIs (useful in environments where they are unreachable).
+// Proxies and merges live prices from DMarket, Skinport, and optionally
+// CSFloat, enriched with CSGOTrader aggregated reference prices. Caches for
+// 5 minutes. Node 18+ required (global fetch). MOCK_DATA=1 serves bundled
+// fixtures instead of hitting the live APIs.
 
 const express = require('express');
 const zlib = require('zlib');
@@ -11,13 +12,16 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MOCK = process.env.MOCK_DATA === '1';
+const CSFLOAT_API_KEY = process.env.CSFLOAT_API_KEY || null;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // Skinport allows few requests per 5 min per IP. Never lower this.
 const HISTORY_TTL_MS = 30 * 60 * 1000; // sales volume moves slowly, refresh sparingly
 const IMAGES_TTL_MS = 24 * 60 * 60 * 1000;
+const REFERENCE_TTL_MS = 6 * 60 * 60 * 1000; // csgotrader updates a few times a day
 let cache = { at: 0, payload: null };
 let historyCache = { at: 0, volumes: null };
 let imageMap = { at: 0, map: null, loading: null };
+let referenceMap = { at: 0, map: null, loading: null };
 
 const DMARKET_PAGES = 3;
 const DMARKET_PAGE_SIZE = 100;
@@ -47,15 +51,25 @@ const DMARKET_ENDPOINTS = [
 ];
 const SKINPORT_ITEMS_URL = 'https://api.skinport.com/v1/items?app_id=730&currency=USD';
 const SKINPORT_HISTORY_URL = 'https://api.skinport.com/v1/sales/history?app_id=730&currency=USD';
+const CSFLOAT_PAGES = 3;
+const CSFLOAT_URL = (page, sortBy) =>
+  `https://csfloat.com/api/v1/listings?page=${page}&limit=50&sort_by=${sortBy}`;
+// Aggregated cross-market prices (Steam, Buff163 and more), no key needed
+const CSGOTRADER_URL = 'https://prices.csgotrader.app/latest/prices_v6.json';
 
-// market_hash_name to Steam CDN image mapping, so Skinport-only items still
-// get pictures (Skinport's public API has no images). Handoff improvement #2.
+// market_hash_name to Steam CDN image mapping, so items without a marketplace
+// image still get pictures. Handoff improvement #2.
 const IMAGE_DATASETS = [
   'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins_not_grouped.json',
   'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/stickers.json',
   'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/crates.json',
   'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/agents.json',
 ];
+
+const STEAM_LISTING = (name) =>
+  `https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}`;
+const BUFF_SEARCH = (name) =>
+  `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${encodeURIComponent(name)}`;
 
 // ---------------------------------------------------------------------------
 // Fetch helpers
@@ -67,7 +81,7 @@ async function fetchJson(url, headers = {}) {
   });
   const buf = Buffer.from(await res.arrayBuffer());
   if (!res.ok) {
-    // Surface the body: DMarket's 410 responses carry migration instructions
+    // Surface the body: API error responses often carry migration instructions
     const snippet = buf.toString('utf8').slice(0, 300).replace(/\s+/g, ' ');
     throw new Error(`HTTP ${res.status} from ${new URL(url).host}${snippet ? ` | body: ${snippet}` : ''}`);
   }
@@ -80,7 +94,7 @@ async function fetchJson(url, headers = {}) {
   }
 }
 
-// DMarket money values arrive in several shapes across API generations:
+// Money values arrive in several shapes across APIs and API generations:
 // {"USD":"1234"} cents, {"amount":1234} cents, "1234" cents, "12.34" dollars,
 // or plain numbers. Returns dollars or null.
 function parseMoney(value) {
@@ -100,9 +114,19 @@ function parseMoney(value) {
   return null;
 }
 
+function centsToUsd(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n / 100;
+}
+
 function dmarketLink(title) {
   return `https://dmarket.com/ingame-items/item-list/csgo-skins?title=${encodeURIComponent(title)}`;
 }
+
+// ---------------------------------------------------------------------------
+// Source fetchers
+// ---------------------------------------------------------------------------
 
 // Normalize one raw DMarket object regardless of which endpoint produced it
 function normalizeDMarketObject(o) {
@@ -182,8 +206,65 @@ async function fetchSkinport() {
   return items;
 }
 
+// CSFloat is optional: set CSFLOAT_API_KEY to enable it as a third source.
+// Prices are cents. The response has been a bare array historically and a
+// {data: [...]} wrapper in newer versions, so accept both. sort_by=best_deal
+// mirrors the best-discount intent, with lowest_price as a fallback.
+function normalizeCSFloatListing(l) {
+  const item = l.item || {};
+  const name = item.market_hash_name || l.market_hash_name;
+  const price = centsToUsd(l.price);
+  if (!name || price === null) return null;
+  const suggested = centsToUsd(l.reference && (l.reference.predicted_price ?? l.reference.base_price));
+  const float = Number(item.float_value ?? l.float_value);
+  return {
+    name,
+    price,
+    suggested,
+    image: item.icon_url
+      ? `https://community.fastly.steamstatic.com/economy/image/${item.icon_url}`
+      : null,
+    float: Number.isFinite(float) ? float : null,
+    listingsCount: null,
+    url: l.id ? `https://csfloat.com/item/${l.id}` : `https://csfloat.com/search?market_hash_name=${encodeURIComponent(name)}`,
+  };
+}
+
+async function fetchCSFloat() {
+  const headers = { Authorization: CSFLOAT_API_KEY };
+  const errors = [];
+  for (const sortBy of ['best_deal', 'lowest_price']) {
+    try {
+      const items = [];
+      let sampleLogged = false;
+      for (let page = 0; page < CSFLOAT_PAGES; page++) {
+        const data = await fetchJson(CSFLOAT_URL(page, sortBy), headers);
+        const listings = Array.isArray(data) ? data : Array.isArray(data.data) ? data.data : [];
+        if (listings.length && !sampleLogged) {
+          sampleLogged = true;
+          console.log(`CSFloat via sort_by=${sortBy}, sample: ${JSON.stringify(listings[0]).slice(0, 400)}`);
+        }
+        for (const l of listings) {
+          const it = normalizeCSFloatListing(l);
+          if (it) items.push(it);
+        }
+        if (listings.length < 50) break;
+      }
+      if (items.length > 0) return items;
+      errors.push(`sort_by=${sortBy}: 0 items`);
+    } catch (err) {
+      errors.push(`sort_by=${sortBy}: ${err.message}`);
+    }
+  }
+  throw new Error(errors.join(' || '));
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment: sales volumes, reference prices, images
+// ---------------------------------------------------------------------------
+
 // Skinport 7-day sales volume per item name, cached for 30 minutes.
-// Soft-fails to null so a hiccup here never blocks the deal list.
+// Soft-fails so a hiccup here never blocks the deal list.
 async function getSalesVolumes() {
   const now = Date.now();
   if (historyCache.volumes && now - historyCache.at < HISTORY_TTL_MS) return historyCache.volumes;
@@ -207,6 +288,41 @@ async function getSalesVolumes() {
     console.error('Skinport sales history failed:', err.message);
     return historyCache.volumes || new Map();
   }
+}
+
+// CSGOTrader aggregated prices: one fetch covers Steam and Buff163 reference
+// prices for the whole catalog, refreshed every 6 hours. This deliberately
+// replaces per-item Steam priceoverview calls, which get IPs banned fast.
+async function getReferencePrices() {
+  const now = Date.now();
+  if (referenceMap.map && now - referenceMap.at < REFERENCE_TTL_MS) return referenceMap.map;
+  if (referenceMap.loading) return referenceMap.loading;
+  const loading = (async () => {
+    const map = new Map();
+    try {
+      const data = MOCK ? readFixture('csgotrader.json') : await fetchJson(CSGOTRADER_URL);
+      for (const [name, p] of Object.entries(data)) {
+        if (!p || typeof p !== 'object') continue;
+        const steamRaw = p.steam || {};
+        const steam = Number(
+          steamRaw.last_24h ?? steamRaw.last_7d ?? steamRaw.last_30d ?? steamRaw.last_90d
+        );
+        const buffRaw = (p.buff163 && p.buff163.starting_at) || {};
+        const buff = Number(buffRaw.price ?? buffRaw);
+        const entry = {};
+        if (Number.isFinite(steam) && steam > 0) entry.steam = steam;
+        if (Number.isFinite(buff) && buff > 0) entry.buff = buff;
+        if (entry.steam || entry.buff) map.set(name, entry);
+      }
+      if (map.size) console.log(`reference prices loaded, ${map.size} names`);
+    } catch (err) {
+      console.error('CSGOTrader reference prices failed:', err.message);
+    }
+    referenceMap = { at: Date.now(), map, loading: null };
+    return map;
+  })();
+  referenceMap.loading = loading;
+  return loading;
 }
 
 // market_hash_name to image URL map, loaded lazily, refreshed daily.
@@ -239,7 +355,7 @@ async function getImageMap() {
 
 // ---------------------------------------------------------------------------
 // Mock mode: same merge pipeline, data comes from bundled fixtures that match
-// the documented response shapes of both APIs.
+// the documented response shapes of the APIs.
 // ---------------------------------------------------------------------------
 
 function readFixture(file) {
@@ -266,9 +382,14 @@ async function fetchSkinportMock() {
     }));
 }
 
+async function fetchCSFloatMock() {
+  const data = readFixture('csfloat.json');
+  return data.map(normalizeCSFloatListing).filter(Boolean);
+}
+
 // ---------------------------------------------------------------------------
 // Merge: exact name match across sources, cheapest source wins, discount is
-// computed against suggested price with a fallback to the highest listed price.
+// computed against the best reference price available.
 // ---------------------------------------------------------------------------
 
 // 0 to 5 popularity from 7-day sales volume, with total listing count as a
@@ -286,7 +407,7 @@ function popularityFor(volume7d, listings) {
   return { score: 0, basis: 'none' };
 }
 
-function mergeSources(dmarketItems, skinportItems, volumes, images) {
+function mergeSources(sourceItems, volumes, images, references) {
   const byName = new Map();
 
   const add = (source, item) => {
@@ -305,8 +426,9 @@ function mergeSources(dmarketItems, skinportItems, volumes, images) {
     if (item.listingsCount) entry.listings += item.listingsCount;
   };
 
-  for (const it of dmarketItems) add('dmarket', it);
-  for (const it of skinportItems) add('skinport', it);
+  for (const [source, items] of Object.entries(sourceItems)) {
+    for (const it of items) add(source, it);
+  }
 
   const items = [];
   for (const entry of byName.values()) {
@@ -315,9 +437,13 @@ function mergeSources(dmarketItems, skinportItems, volumes, images) {
     const best = listings[0];
     const highestListed = listings[listings.length - 1].price;
 
+    const ref = references.get(entry.name) || {};
+    // Discount reference, most trustworthy first: a marketplace suggested
+    // price, then Buff163 (the de facto market benchmark), then Steam,
+    // then the highest price the item is listed at anywhere
     const suggested =
       listings.map((l) => l.suggested).find((s) => s !== null && s !== undefined) ?? null;
-    const reference = suggested ?? highestListed;
+    const reference = suggested ?? ref.buff ?? ref.steam ?? highestListed;
     const discount = reference > 0 ? Math.max(0, ((reference - best.price) / reference) * 100) : 0;
 
     const spread =
@@ -326,6 +452,10 @@ function mergeSources(dmarketItems, skinportItems, volumes, images) {
     const vol = volumes.get(entry.name);
     const popularity = popularityFor(vol ? vol.volume7d : null, entry.listings || null);
 
+    const refs = [];
+    if (ref.steam) refs.push({ label: 'Steam', price: ref.steam, url: STEAM_LISTING(entry.name) });
+    if (ref.buff) refs.push({ label: 'Buff163', price: ref.buff, url: BUFF_SEARCH(entry.name) });
+
     items.push({
       name: entry.name,
       image: entry.image || images.get(entry.name) || null,
@@ -333,11 +463,12 @@ function mergeSources(dmarketItems, skinportItems, volumes, images) {
       bestPrice: best.price,
       bestSource: best.source,
       bestUrl: best.url,
-      suggestedPrice: suggested,
+      suggestedPrice: reference,
       discount: Math.round(discount * 10) / 10,
       spread: Math.round(spread * 100) / 100,
       crossListed: listings.length > 1,
       popularity,
+      refs,
       listings: listings.map((l) => ({ source: l.source, price: l.price, url: l.url })),
     });
   }
@@ -350,30 +481,53 @@ function mergeSources(dmarketItems, skinportItems, volumes, images) {
 // API
 // ---------------------------------------------------------------------------
 
+const CSFLOAT_ENABLED = MOCK || Boolean(CSFLOAT_API_KEY);
+
 async function buildPayload() {
-  const [dm, sp, volumes, images] = await Promise.allSettled([
-    MOCK ? fetchDMarketMock() : fetchDMarket(),
-    MOCK ? fetchSkinportMock() : fetchSkinport(),
+  const tasks = {
+    dmarket: MOCK ? fetchDMarketMock() : fetchDMarket(),
+    skinport: MOCK ? fetchSkinportMock() : fetchSkinport(),
+    csfloat: CSFLOAT_ENABLED ? (MOCK ? fetchCSFloatMock() : fetchCSFloat()) : Promise.resolve([]),
+  };
+  const [dm, sp, cf, volumes, images, references] = await Promise.allSettled([
+    tasks.dmarket,
+    tasks.skinport,
+    tasks.csfloat,
     getSalesVolumes(),
     getImageMap(),
+    getReferencePrices(),
   ]);
 
   if (dm.status === 'rejected') console.error('DMarket failed:', dm.reason.message);
   if (sp.status === 'rejected') console.error('Skinport failed:', sp.reason.message);
+  if (cf.status === 'rejected') console.error('CSFloat failed:', cf.reason.message);
 
-  const dmItems = dm.status === 'fulfilled' ? dm.value : [];
-  const spItems = sp.status === 'fulfilled' ? sp.value : [];
+  const sourceItems = {
+    dmarket: dm.status === 'fulfilled' ? dm.value : [],
+    skinport: sp.status === 'fulfilled' ? sp.value : [],
+    csfloat: cf.status === 'fulfilled' ? cf.value : [],
+  };
   const vols = volumes.status === 'fulfilled' ? volumes.value : new Map();
   const imgs = images.status === 'fulfilled' ? images.value : new Map();
+  const refs = references.status === 'fulfilled' ? references.value : new Map();
+
+  const sourceStatus = (settled, items, enabled = true) => ({
+    enabled,
+    ok: enabled && settled.status === 'fulfilled',
+    count: items.length,
+    error: enabled && settled.status === 'rejected' ? settled.reason.message : null,
+  });
 
   return {
     mock: MOCK,
     fetchedAt: new Date().toISOString(),
     sources: {
-      dmarket: { ok: dm.status === 'fulfilled', count: dmItems.length, error: dm.status === 'rejected' ? dm.reason.message : null },
-      skinport: { ok: sp.status === 'fulfilled', count: spItems.length, error: sp.status === 'rejected' ? sp.reason.message : null },
+      dmarket: sourceStatus(dm, sourceItems.dmarket),
+      skinport: sourceStatus(sp, sourceItems.skinport),
+      csfloat: sourceStatus(cf, sourceItems.csfloat, CSFLOAT_ENABLED),
     },
-    items: mergeSources(dmItems, spItems, vols, imgs),
+    referenceCount: refs.size,
+    items: mergeSources(sourceItems, vols, imgs, refs),
   };
 }
 
@@ -386,14 +540,14 @@ app.get('/api/deals', async (req, res) => {
     const payload = await buildPayload();
     // Only refresh the cache clock when at least one source answered, so a
     // total outage retries on the next request instead of caching emptiness
-    if (payload.sources.dmarket.ok || payload.sources.skinport.ok) {
+    if (Object.values(payload.sources).some((s) => s.ok)) {
       cache = { at: now, payload };
     }
     res.json({ ...payload, cached: false });
   } catch (err) {
     console.error('deal build failed:', err);
     if (cache.payload) return res.json({ ...cache.payload, cached: true, stale: true });
-    res.status(502).json({ error: 'Both marketplace sources are unavailable right now' });
+    res.status(502).json({ error: 'All marketplace sources are unavailable right now' });
   }
 });
 
@@ -401,5 +555,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.listen(PORT, () => {
   console.log(`CS2 Deal Finder running at http://localhost:${PORT}${MOCK ? ' (mock data mode)' : ''}`);
-  if (!MOCK) getImageMap(); // start warming the image map right away
+  if (!CSFLOAT_ENABLED) console.log('CSFloat disabled, set CSFLOAT_API_KEY to enable it as a third source');
+  if (!MOCK) {
+    getImageMap(); // start warming the image map right away
+    getReferencePrices();
+  }
 });
