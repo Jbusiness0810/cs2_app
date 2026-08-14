@@ -1,0 +1,52 @@
+[
+  {
+    "market_hash_name": "AK-47 | Redline (Field-Tested)",
+    "currency": "USD",
+    "item_page": "https://skinport.com/item/ak-47-redline-field-tested",
+    "market_page": "https://skinport.com/market?item=Redline&cat=AK-47",
+    "last_24_hours": { "min": 52.1, "max": 61.0, "avg": 55.9, "volume": 132 },
+    "last_7_days": { "min": 50.0, "max": 66.4, "avg": 56.6, "volume": 811 },
+    "last_30_days": { "min": 48.9, "max": 68.0, "avg": 57.1, "volume": 3390 },
+    "last_90_days": { "min": 44.0, "max": 70.2, "avg": 55.8, "volume": 9605 }
+  },
+  {
+    "market_hash_name": "AWP | Asiimov (Well-Worn)",
+    "currency": "USD",
+    "item_page": "https://skinport.com/item/awp-asiimov-well-worn",
+    "market_page": "https://skinport.com/market?item=Asiimov&cat=AWP",
+    "last_24_hours": { "min": 110.0, "max": 121.5, "avg": 115.2, "volume": 34 },
+    "last_7_days": { "min": 108.2, "max": 126.0, "avg": 116.8, "volume": 217 },
+    "last_30_days": { "min": 102.0, "max": 130.0, "avg": 115.0, "volume": 902 },
+    "last_90_days": { "min": 95.5, "max": 133.1, "avg": 112.4, "volume": 2711 }
+  },
+  {
+    "market_hash_name": "M4A1-S | Hyper Beast (Minimal Wear)",
+    "currency": "USD",
+    "item_page": "https://skinport.com/item/m4a1-s-hyper-beast-minimal-wear",
+    "market_page": "https://skinport.com/market?item=Hyper+Beast&cat=M4A1-S",
+    "last_24_hours": { "min": 27.0, "max": 31.2, "avg": 29.0, "volume": 11 },
+    "last_7_days": { "min": 26.1, "max": 33.0, "avg": 29.4, "volume": 68 },
+    "last_30_days": { "min": 25.0, "max": 34.9, "avg": 29.2, "volume": 305 },
+    "last_90_days": { "min": 23.8, "max": 36.0, "avg": 28.7, "volume": 899 }
+  },
+  {
+    "market_hash_name": "Sport Gloves | Pandora's Box (Field-Tested)",
+    "currency": "USD",
+    "item_page": "https://skinport.com/item/sport-gloves-pandoras-box-field-tested",
+    "market_page": "https://skinport.com/market?item=Pandora%27s+Box&cat=Sport+Gloves",
+    "last_24_hours": { "min": null, "max": null, "avg": null, "volume": 0 },
+    "last_7_days": { "min": 1550.0, "max": 1720.0, "avg": 1626.3, "volume": 3 },
+    "last_30_days": { "min": 1490.0, "max": 1800.0, "avg": 1633.8, "volume": 17 },
+    "last_90_days": { "min": 1401.0, "max": 1912.0, "avg": 1617.5, "volume": 44 }
+  },
+  {
+    "market_hash_name": "Butterfly Knife | Doppler (Factory New)",
+    "currency": "USD",
+    "item_page": "https://skinport.com/item/butterfly-knife-doppler-factory-new",
+    "market_page": "https://skinport.com/market?item=Doppler&cat=Butterfly+Knife",
+    "last_24_hours": { "min": 1230.0, "max": 1310.0, "avg": 1266.0, "volume": 4 },
+    "last_7_days": { "min": 1195.0, "max": 1350.0, "avg": 1263.9, "volume": 22 },
+    "last_30_days": { "min": 1150.0, "max": 1400.0, "avg": 1259.7, "volume": 96 },
+    "last_90_days": { "min": 1100.0, "max": 1460.0, "avg": 1248.2, "volume": 260 }
+  }
+]

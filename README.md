@@ -42,12 +42,13 @@ Boots the server in mock mode and asserts the /api/deals response shape, the cro
 
 ## How it works
 
-- The server pulls 3 pages (100 items each) of best-discount listings from DMarket and the full Skinport item list, then merges the two by exact item name.
+- The server pulls 3 pages (100 items each) of listings from DMarket and the full Skinport item list, then merges the two by exact item name. DMarket retired its old exchange endpoint with HTTP 410, so the fetcher tries a chain of endpoints (current offers/v1/search first) and logs which one answered plus a sample object for field verification.
 - The cheapest source wins per item. Discount is computed against the suggested price, falling back to the highest listed price when no suggested price exists.
 - Results are cached for 5 minutes. Skinport rate limits to roughly 1 request per 5 minutes per IP, so never remove the cache.
 - Deals are graded with CS2 rarity tiers: Consumer (0%+), Mil-Spec (5%+), Restricted (12%+), Classified (20%+), Covert (30%+).
-- Images come from DMarket only. Skinport-only items show a "NO PREVIEW" placeholder.
-- Every price links to the live marketplace listing.
+- Every item gets a 0 to 5 popularity rating from Skinport 7-day sales volume (refreshed every 30 minutes), falling back to total listing counts when an item has no sales history.
+- Images come from DMarket when available, with a fallback to Steam CDN images resolved through the ByMykel/CSGO-API market hash name dataset (refreshed daily), so Skinport-only items get pictures too. Items missing from both show a "NO PREVIEW" placeholder.
+- The card image, the item name, and every price are links to the live marketplace listing.
 
 ## Live verification checklist
 

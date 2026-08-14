@@ -157,12 +157,28 @@
   .src { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
   .price-row a {
     color: var(--text);
-    text-decoration: none;
+    text-decoration: underline;
+    text-decoration-color: #3d5166;
+    text-underline-offset: 3px;
     font-family: 'Chakra Petch', sans-serif;
     font-weight: 600;
   }
-  .price-row a:hover { color: var(--gold); text-decoration: underline; }
+  .price-row a::after { content: ' \2197'; font-size: 10px; color: var(--muted); }
+  .price-row a:hover { color: var(--gold); text-decoration-color: var(--gold); }
   .price-row.best a { color: #6ee26e; }
+  a.itemlink { color: inherit; text-decoration: none; display: block; }
+  a.itemlink:hover .name { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
+  .pop { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .pop .bars { display: flex; gap: 2px; }
+  .pop .bars i {
+    width: 9px;
+    height: 8px;
+    background: #2a3a4c;
+    border-radius: 1px;
+    transform: skewX(-12deg);
+  }
+  .pop .bars i.on { background: var(--gold); }
+  .pop .lbl { font-family: 'Chakra Petch', sans-serif; letter-spacing: 1px; text-transform: uppercase; }
   .foot {
     display: flex;
     justify-content: space-between;
@@ -190,6 +206,7 @@
   <label class="chk"><input type="checkbox" id="imgOnly"> With images only</label>
   <select id="sort">
     <option value="discount">Sort: Discount</option>
+    <option value="popularity">Sort: Popularity</option>
     <option value="spread">Sort: Cross-market spread</option>
     <option value="priceAsc">Sort: Price low to high</option>
     <option value="priceDesc">Sort: Price high to low</option>
@@ -208,6 +225,7 @@ const TIERS = [
   { min: 0,  name: 'Consumer', color: 'var(--consumer)' },
 ];
 const SOURCE_LABEL = { dmarket: 'DMarket', skinport: 'Skinport' };
+const POP_LABELS = ['Dead', 'Very low', 'Low', 'Moderate', 'High', 'Very high'];
 const METER_MAX = 40; // discount percent that pins the meter at the far end
 
 let allItems = [];
@@ -244,6 +262,10 @@ function render() {
 
   const cmp = {
     discount: (a, b) => b.discount - a.discount,
+    popularity: (a, b) =>
+      (b.popularity.score - a.popularity.score) ||
+      ((b.popularity.volume7d || 0) - (a.popularity.volume7d || 0)) ||
+      (b.discount - a.discount),
     spread: (a, b) => b.spread - a.spread,
     priceAsc: (a, b) => a.bestPrice - b.bestPrice,
     priceDesc: (a, b) => b.bestPrice - a.bestPrice,
@@ -258,17 +280,29 @@ function render() {
     const rows = it.listings.map(l => `
       <div class="price-row ${l.source === it.bestSource ? 'best' : ''}">
         <span class="src">${SOURCE_LABEL[l.source] || esc(l.source)}</span>
-        <a href="${esc(l.url)}" target="_blank" rel="noopener">${fmtUsd(l.price)}</a>
+        <a href="${esc(l.url)}" target="_blank" rel="noopener" title="Open this listing on ${SOURCE_LABEL[l.source] || esc(l.source)}">${fmtUsd(l.price)}</a>
       </div>`).join('');
+    const pop = it.popularity || { score: 0, basis: 'none' };
+    const popBars = [1,2,3,4,5].map(i => `<i class="${i <= pop.score ? 'on' : ''}"></i>`).join('');
+    const popText = pop.basis === 'sales'
+      ? `${POP_LABELS[pop.score]} · ${pop.volume7d} sold in 7d`
+      : pop.basis === 'listings'
+      ? `${POP_LABELS[pop.score]} · ${pop.listings} listed`
+      : 'No sales data';
     return `
     <div class="card" style="--tier:${tier.color}">
-      <div class="thumb">${it.image
-        ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
-        : '<div class="noimg">NO PREVIEW</div>'}</div>
+      <a class="itemlink" href="${esc(it.bestUrl)}" target="_blank" rel="noopener" title="Open the best priced listing">
+        <div class="thumb">${it.image
+          ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
+          : '<div class="noimg">NO PREVIEW</div>'}</div>
+      </a>
       <div class="body">
         <div class="grade">${tier.name} Deal</div>
-        <div class="name">${esc(it.name)}</div>
+        <a class="itemlink" href="${esc(it.bestUrl)}" target="_blank" rel="noopener" title="Open the best priced listing">
+          <div class="name">${esc(it.name)}</div>
+        </a>
         <div class="meter"><div class="pin" style="left:${pin}%"></div></div>
+        <div class="pop"><span class="bars">${popBars}</span><span class="lbl">${popText}</span></div>
         <div class="prices">${rows}</div>
         <div class="foot">
           <span class="discount">${it.discount.toFixed(1)}% off</span>

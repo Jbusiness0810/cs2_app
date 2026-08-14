@@ -73,6 +73,17 @@ async function waitForServer() {
   assert(gloves.image === null, 'Skinport-only item should have no image');
   assert(gloves.bestUrl.includes('skinport.com'), 'Skinport item should link to skinport');
 
+  // Popularity: AK-47 has 811 sales in the 7-day fixture window, top tier
+  assert(ak.popularity && ak.popularity.score === 5 && ak.popularity.basis === 'sales',
+    `AK-47 popularity should be 5/sales, got ${JSON.stringify(ak.popularity)}`);
+  assert(ak.popularity.volume7d === 811, `AK-47 volume7d should be 811, got ${ak.popularity.volume7d}`);
+
+  // Items without sales history fall back to the listings-count signal
+  const p250 = data.items.find((i) => i.name === 'P250 | See Ya Later (Field-Tested)');
+  assert(p250, 'P250 should be present');
+  assert(p250.popularity.basis === 'listings' && p250.popularity.score === 3,
+    `P250 popularity should be 3/listings (150 listed), got ${JSON.stringify(p250.popularity)}`);
+
   // Unlisted items (null min_price) are excluded
   assert(!data.items.find((i) => i.name.includes('Nuclear Threat')), 'null min_price items should be excluded');
 
