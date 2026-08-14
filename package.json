@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "mock": "MOCK_DATA=1 node server.js",
+    "build:data": "node scripts/build-data.js",
     "test": "node tests/smoke.js"
   },
   "engines": {

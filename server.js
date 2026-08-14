@@ -293,10 +293,34 @@ async function getSalesVolumes() {
 // CSGOTrader aggregated prices: one fetch covers Steam and Buff163 reference
 // prices for the whole catalog, refreshed every 6 hours. This deliberately
 // replaces per-item Steam priceoverview calls, which get IPs banned fast.
+// Build-time snapshots (scripts/build-data.js) load from disk instantly.
+// Serverless cold starts rely on these, and they speed local startup too.
+function readPrebuilt(file) {
+  try {
+    const p = path.join(__dirname, 'data', file);
+    if (!fs.existsSync(p)) return null;
+    const obj = JSON.parse(fs.readFileSync(p, 'utf8'));
+    const map = new Map(Object.entries(obj));
+    return map.size ? map : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getReferencePrices() {
   const now = Date.now();
   if (referenceMap.map && now - referenceMap.at < REFERENCE_TTL_MS) return referenceMap.map;
   if (referenceMap.loading) return referenceMap.loading;
+  if (!MOCK && !referenceMap.map) {
+    const prebuilt = readPrebuilt('reference-prices.json');
+    if (prebuilt) {
+      // Treat the snapshot as always fresh: it refreshes on each deploy and
+      // reference prices only move a few times a day anyway
+      referenceMap = { at: Infinity, map: prebuilt, loading: null };
+      console.log(`reference prices loaded from snapshot, ${prebuilt.size} names`);
+      return prebuilt;
+    }
+  }
   const loading = (async () => {
     const map = new Map();
     try {
@@ -331,6 +355,14 @@ async function getImageMap() {
   const now = Date.now();
   if (imageMap.map && now - imageMap.at < IMAGES_TTL_MS) return imageMap.map;
   if (imageMap.loading) return imageMap.loading;
+  if (!MOCK && !imageMap.map) {
+    const prebuilt = readPrebuilt('image-map.json');
+    if (prebuilt) {
+      imageMap = { at: Infinity, map: prebuilt, loading: null };
+      console.log(`image map loaded from snapshot, ${prebuilt.size} names`);
+      return prebuilt;
+    }
+  }
   const loading = (async () => {
     const map = new Map();
     if (!MOCK) {
@@ -532,6 +564,9 @@ async function buildPayload() {
 }
 
 app.get('/api/deals', async (req, res) => {
+  // On Vercel the CDN honors s-maxage, giving the 5 minute cache across
+  // stateless invocations. Harmless for local single-process serving.
+  res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   const now = Date.now();
   if (cache.payload && now - cache.at < CACHE_TTL_MS) {
     return res.json({ ...cache.payload, cached: true });
@@ -553,11 +588,17 @@ app.get('/api/deals', async (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, () => {
-  console.log(`CS2 Deal Finder running at http://localhost:${PORT}${MOCK ? ' (mock data mode)' : ''}`);
-  if (!CSFLOAT_ENABLED) console.log('CSFloat disabled, set CSFLOAT_API_KEY to enable it as a third source');
-  if (!MOCK) {
-    getImageMap(); // start warming the image map right away
-    getReferencePrices();
-  }
-});
+// Local: run the server directly. Vercel: api/index.js imports the app and
+// each request is handled by a serverless invocation instead of listen()
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`CS2 Deal Finder running at http://localhost:${PORT}${MOCK ? ' (mock data mode)' : ''}`);
+    if (!CSFLOAT_ENABLED) console.log('CSFloat disabled, set CSFLOAT_API_KEY to enable it as a third source');
+    if (!MOCK) {
+      getImageMap(); // start warming the image map right away
+      getReferencePrices();
+    }
+  });
+}
+
+module.exports = app;

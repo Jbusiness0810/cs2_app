@@ -33,6 +33,23 @@ node server.js
 
 On mac or Linux: `CSFLOAT_API_KEY=your-key-here node server.js`. Without the key the app runs on two sources and prints a reminder at startup.
 
+## Deploy to Vercel
+
+The repo is Vercel-ready. Import it at vercel.com/new, accept the defaults, and deploy. What happens under the hood:
+
+- `vercel.json` routes `/api/*` to a serverless function wrapping the same Express app, and `public/` is served from the CDN.
+- The build step (`scripts/build-data.js`) precomputes `data/image-map.json` and `data/reference-prices.json`, so cold starts read two small local files instead of fetching around 100 MB of upstream datasets.
+- The 5 minute cache is enforced at the CDN through `Cache-Control: s-maxage=300`, so marketplace APIs see about one fetch per 5 minutes no matter how many visitors hit the page.
+
+Set `CSFLOAT_API_KEY` in the Vercel project's environment variables to enable CSFloat.
+
+Two caveats of the serverless setup:
+
+1. Reference prices and images refresh on each deploy rather than on a timer. Redeploy occasionally (or enable a Vercel cron hitting a deploy hook) to keep them current.
+2. Skinport rate limits by IP and Vercel egress IPs are shared, so the Skinport source can occasionally 429 through no fault of yours. The app degrades gracefully when that happens and recovers on the next refresh.
+
+Local development is unchanged: `node server.js` still works exactly as before, and running `npm run build:data` locally speeds up startup by using the same snapshots.
+
 ## Mock mode
 
 The live marketplace APIs are unreachable from some sandboxed environments. Mock mode serves bundled fixtures through the exact same merge pipeline so the app can be developed and tested anywhere:
