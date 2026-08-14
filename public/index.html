@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CS2 Deal Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e141b;
+    --panel: #151e28;
+    --panel-2: #1b2734;
+    --edge: #263749;
+    --text: #dbe4ee;
+    --muted: #7e93a8;
+    --gold: #cfa93c;
+    --consumer: #b0c3d9;
+    --milspec: #4b69ff;
+    --restricted: #8847ff;
+    --classified: #d32ce6;
+    --covert: #eb4b4b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(180deg, #16202c 0%, #101821 100%);
+    border-bottom: 1px solid var(--edge);
+    padding: 18px 24px 14px;
+  }
+  h1 {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 22px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  h1 span { color: var(--gold); }
+  #status {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 12px;
+    letter-spacing: 1px;
+    margin-top: 6px;
+    color: var(--muted);
+  }
+  #status.live { color: #6ee26e; }
+  #status.partial { color: var(--gold); }
+  #status.down { color: var(--covert); }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 14px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--edge);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .controls input[type="text"], .controls input[type="number"], .controls select {
+    background: var(--panel-2);
+    border: 1px solid var(--edge);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: 3px;
+  }
+  .controls input[type="text"] { width: 220px; }
+  .controls input[type="number"] { width: 90px; }
+  .controls label.chk {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+  }
+  .controls input:focus, .controls select:focus { outline: 1px solid var(--gold); }
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 14px;
+    padding: 20px 24px 40px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-top: 3px solid var(--tier, var(--edge));
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform .1s ease;
+  }
+  .card:hover { transform: translateY(-2px); }
+  .thumb {
+    height: 140px;
+    background: radial-gradient(ellipse at center, #1d2a39 0%, #121b25 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .thumb img { max-width: 90%; max-height: 130px; object-fit: contain; }
+  .noimg {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: #3d5166;
+    border: 1px dashed #2a3a4c;
+    padding: 8px 14px;
+  }
+  .body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .name {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    min-height: 2.7em;
+  }
+  .grade {
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--tier);
+  }
+  .meter {
+    height: 7px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #3d5166 0%, var(--milspec) 22%, var(--restricted) 43%, var(--classified) 63%, var(--covert) 84%);
+    position: relative;
+  }
+  .meter .pin {
+    position: absolute;
+    top: -4px;
+    width: 3px;
+    height: 15px;
+    background: #fff;
+    border-radius: 1px;
+    box-shadow: 0 0 3px rgba(0,0,0,.8);
+    transform: translateX(-50%);
+  }
+  .prices { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+  }
+  .src { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .price-row a {
+    color: var(--text);
+    text-decoration: none;
+    font-family: 'Chakra Petch', sans-serif;
+    font-weight: 600;
+  }
+  .price-row a:hover { color: var(--gold); text-decoration: underline; }
+  .price-row.best a { color: #6ee26e; }
+  .foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 1px solid var(--edge);
+  }
+  .discount { color: var(--tier); font-family: 'Chakra Petch', sans-serif; font-weight: 700; }
+  #empty { padding: 60px 24px; text-align: center; color: var(--muted); display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CS2 <span>Deal Finder</span></h1>
+  <div id="status">CONNECTING...</div>
+</header>
+
+<div class="controls">
+  <input type="text" id="search" placeholder="Search skins...">
+  <input type="number" id="minPrice" placeholder="Min $" min="0" step="0.01">
+  <input type="number" id="maxPrice" placeholder="Max $" min="0" step="0.01">
+  <label class="chk"><input type="checkbox" id="crossOnly"> Cross-listed only</label>
+  <label class="chk"><input type="checkbox" id="imgOnly"> With images only</label>
+  <select id="sort">
+    <option value="discount">Sort: Discount</option>
+    <option value="spread">Sort: Cross-market spread</option>
+    <option value="priceAsc">Sort: Price low to high</option>
+    <option value="priceDesc">Sort: Price high to low</option>
+  </select>
+</div>
+
+<div id="grid"></div>
+<div id="empty">No deals match the current filters</div>
+
+<script>
+const TIERS = [
+  { min: 30, name: 'Covert', color: 'var(--covert)' },
+  { min: 20, name: 'Classified', color: 'var(--classified)' },
+  { min: 12, name: 'Restricted', color: 'var(--restricted)' },
+  { min: 5,  name: 'Mil-Spec', color: 'var(--milspec)' },
+  { min: 0,  name: 'Consumer', color: 'var(--consumer)' },
+];
+const SOURCE_LABEL = { dmarket: 'DMarket', skinport: 'Skinport' };
+const METER_MAX = 40; // discount percent that pins the meter at the far end
+
+let allItems = [];
+
+function tierFor(discount) {
+  return TIERS.find(t => discount >= t.min) || TIERS[TIERS.length - 1];
+}
+
+function fmtUsd(n) {
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const min = parseFloat(document.getElementById('minPrice').value);
+  const max = parseFloat(document.getElementById('maxPrice').value);
+  const crossOnly = document.getElementById('crossOnly').checked;
+  const imgOnly = document.getElementById('imgOnly').checked;
+  const sort = document.getElementById('sort').value;
+
+  let items = allItems.filter(it =>
+    (!q || it.name.toLowerCase().includes(q)) &&
+    (isNaN(min) || it.bestPrice >= min) &&
+    (isNaN(max) || it.bestPrice <= max) &&
+    (!crossOnly || it.crossListed) &&
+    (!imgOnly || it.image)
+  );
+
+  const cmp = {
+    discount: (a, b) => b.discount - a.discount,
+    spread: (a, b) => b.spread - a.spread,
+    priceAsc: (a, b) => a.bestPrice - b.bestPrice,
+    priceDesc: (a, b) => b.bestPrice - a.bestPrice,
+  }[sort];
+  items.sort(cmp);
+
+  const grid = document.getElementById('grid');
+  document.getElementById('empty').style.display = items.length ? 'none' : 'block';
+  grid.innerHTML = items.map(it => {
+    const tier = tierFor(it.discount);
+    const pin = Math.min(it.discount / METER_MAX, 1) * 100;
+    const rows = it.listings.map(l => `
+      <div class="price-row ${l.source === it.bestSource ? 'best' : ''}">
+        <span class="src">${SOURCE_LABEL[l.source] || esc(l.source)}</span>
+        <a href="${esc(l.url)}" target="_blank" rel="noopener">${fmtUsd(l.price)}</a>
+      </div>`).join('');
+    return `
+    <div class="card" style="--tier:${tier.color}">
+      <div class="thumb">${it.image
+        ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
+        : '<div class="noimg">NO PREVIEW</div>'}</div>
+      <div class="body">
+        <div class="grade">${tier.name} Deal</div>
+        <div class="name">${esc(it.name)}</div>
+        <div class="meter"><div class="pin" style="left:${pin}%"></div></div>
+        <div class="prices">${rows}</div>
+        <div class="foot">
+          <span class="discount">${it.discount.toFixed(1)}% off</span>
+          <span>${it.suggestedPrice ? 'vs ' + fmtUsd(it.suggestedPrice) : it.crossListed ? 'spread ' + fmtUsd(it.spread) : ''}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setStatus(data) {
+  const el = document.getElementById('status');
+  const dm = data.sources.dmarket.ok;
+  const sp = data.sources.skinport.ok;
+  const n = data.items.length;
+  const tag = data.mock ? 'MOCK DATA' : 'LIVE';
+  if (dm && sp) {
+    el.textContent = `${tag} - DMarket + Skinport | ${n} items`;
+    el.className = data.mock ? 'partial' : 'live';
+  } else if (dm || sp) {
+    el.textContent = `${tag} - ${dm ? 'DMarket' : 'Skinport'} only | ${n} items`;
+    el.className = 'partial';
+  } else {
+    el.textContent = 'OFFLINE - both sources failed, retrying in 60s';
+    el.className = 'down';
+  }
+}
+
+async function load() {
+  try {
+    const res = await fetch('/api/deals');
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    allItems = data.items || [];
+    setStatus(data);
+    render();
+    if (!data.sources.dmarket.ok && !data.sources.skinport.ok) setTimeout(load, 60000);
+  } catch (e) {
+    const el = document.getElementById('status');
+    el.textContent = 'OFFLINE - server unreachable, retrying in 60s';
+    el.className = 'down';
+    setTimeout(load, 60000);
+  }
+}
+
+for (const id of ['search', 'minPrice', 'maxPrice', 'crossOnly', 'imgOnly', 'sort']) {
+  document.getElementById(id).addEventListener('input', render);
+}
+load();
+setInterval(load, 5 * 60 * 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "cs2-deal-finder",
+  "version": "1.0.0",
+  "description": "Finds the best CS2 skin deals by comparing live prices across DMarket and Skinport",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "mock": "MOCK_DATA=1 node server.js",
+    "test": "node tests/smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

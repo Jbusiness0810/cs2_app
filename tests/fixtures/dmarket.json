@@ -1,0 +1,61 @@
+{
+  "cursor": "",
+  "objects": [
+    {
+      "itemId": "dm-001",
+      "title": "AK-47 | Redline (Field-Tested)",
+      "price": { "USD": "5250" },
+      "suggestedPrice": { "USD": "7800" },
+      "image": "https://cdn.dmarket.com/prod/mock/ak47-redline.png",
+      "extra": { "floatValue": 0.2531 }
+    },
+    {
+      "itemId": "dm-002",
+      "title": "AWP | Asiimov (Well-Worn)",
+      "price": { "USD": "11890" },
+      "suggestedPrice": { "USD": "14500" },
+      "image": "https://cdn.dmarket.com/prod/mock/awp-asiimov.png",
+      "extra": { "floatValue": 0.4102 }
+    },
+    {
+      "itemId": "dm-003",
+      "title": "M4A4 | Neo-Noir (Minimal Wear)",
+      "price": { "USD": "3120" },
+      "suggestedPrice": { "USD": "3300" },
+      "image": "https://cdn.dmarket.com/prod/mock/m4a4-neonoir.png",
+      "extra": { "floatValue": 0.1122 }
+    },
+    {
+      "itemId": "dm-004",
+      "title": "Desert Eagle | Printstream (Factory New)",
+      "price": { "USD": "9450" },
+      "suggestedPrice": { "USD": "10400" },
+      "image": "https://cdn.dmarket.com/prod/mock/deagle-printstream.png",
+      "extra": { "floatValue": 0.0312 }
+    },
+    {
+      "itemId": "dm-005",
+      "title": "Butterfly Knife | Doppler (Factory New)",
+      "price": { "USD": "125000" },
+      "suggestedPrice": { "USD": "182000" },
+      "image": "https://cdn.dmarket.com/prod/mock/butterfly-doppler.png",
+      "extra": { "floatValue": 0.0141 }
+    },
+    {
+      "itemId": "dm-006",
+      "title": "USP-S | Kill Confirmed (Field-Tested)",
+      "price": { "USD": "6100" },
+      "suggestedPrice": null,
+      "image": "https://cdn.dmarket.com/prod/mock/usps-killconfirmed.png",
+      "extra": {}
+    },
+    {
+      "itemId": "dm-007",
+      "title": "Glock-18 | Fade (Factory New)",
+      "price": { "USD": "98000" },
+      "suggestedPrice": { "USD": "102000" },
+      "image": "https://cdn.dmarket.com/prod/mock/glock-fade.png",
+      "extra": { "floatValue": 0.0089 }
+    }
+  ]
+}
