@@ -326,6 +326,8 @@ function setStatus(data) {
   const el = document.getElementById('status');
   const enabled = Object.entries(data.sources).filter(([, s]) => s.enabled !== false);
   const up = enabled.filter(([, s]) => s.ok).map(([k]) => SOURCE_LABEL[k] || k);
+  const failed = enabled.filter(([, s]) => !s.ok && s.error);
+  el.title = failed.map(([k, s]) => `${SOURCE_LABEL[k] || k}: ${s.error}`).join('\n');
   const n = data.items.length;
   const tag = data.mock ? 'MOCK DATA' : 'LIVE';
   if (up.length === enabled.length && up.length > 0) {
@@ -340,20 +342,34 @@ function setStatus(data) {
   }
 }
 
+let retryTimer = null;
+function retrySoon(ms) {
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(load, ms);
+}
+
 async function load() {
+  const el = document.getElementById('status');
+  const slowNote = setTimeout(() => {
+    if (el.textContent.startsWith('CONNECTING')) {
+      el.textContent = 'CONNECTING... first fetch pulls live market data and can take up to a minute';
+    }
+  }, 4000);
   try {
-    const res = await fetch('/api/deals');
+    const res = await fetch('/api/deals', { signal: AbortSignal.timeout(75000) });
     if (!res.ok) throw new Error('bad response');
     const data = await res.json();
     allItems = data.items || [];
     setStatus(data);
     render();
-    if (!data.sources.dmarket.ok && !data.sources.skinport.ok) setTimeout(load, 60000);
+    const anyUp = Object.values(data.sources).some(s => s.enabled !== false && s.ok);
+    if (!anyUp) retrySoon(60000);
   } catch (e) {
-    const el = document.getElementById('status');
     el.textContent = 'OFFLINE - server unreachable, retrying in 60s';
     el.className = 'down';
-    setTimeout(load, 60000);
+    retrySoon(60000);
+  } finally {
+    clearTimeout(slowNote);
   }
 }
 

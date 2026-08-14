@@ -12,7 +12,9 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MOCK = process.env.MOCK_DATA === '1';
+const ON_VERCEL = Boolean(process.env.VERCEL);
 const CSFLOAT_API_KEY = process.env.CSFLOAT_API_KEY || null;
+const FETCH_TIMEOUT_MS = 25 * 1000; // no upstream may hang the whole response
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // Skinport allows few requests per 5 min per IP. Never lower this.
 const HISTORY_TTL_MS = 30 * 60 * 1000; // sales volume moves slowly, refresh sparingly
@@ -76,9 +78,18 @@ const BUFF_SEARCH = (name) =>
 // ---------------------------------------------------------------------------
 
 async function fetchJson(url, headers = {}) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'cs2-deal-finder/1.0', ...headers },
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'User-Agent': 'cs2-deal-finder/1.0', ...headers },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      throw new Error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s from ${new URL(url).host}`);
+    }
+    throw err;
+  }
   const buf = Buffer.from(await res.arrayBuffer());
   if (!res.ok) {
     // Surface the body: API error responses often carry migration instructions
@@ -296,15 +307,21 @@ async function getSalesVolumes() {
 // Build-time snapshots (scripts/build-data.js) load from disk instantly.
 // Serverless cold starts rely on these, and they speed local startup too.
 function readPrebuilt(file) {
-  try {
-    const p = path.join(__dirname, 'data', file);
-    if (!fs.existsSync(p)) return null;
-    const obj = JSON.parse(fs.readFileSync(p, 'utf8'));
-    const map = new Map(Object.entries(obj));
-    return map.size ? map : null;
-  } catch {
-    return null;
+  // Bundlers relocate files, so probe the plausible roots
+  const candidates = [
+    path.join(__dirname, 'data', file),
+    path.join(process.cwd(), 'data', file),
+    path.join(__dirname, '..', 'data', file),
+  ];
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const obj = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const map = new Map(Object.entries(obj));
+      if (map.size) return map;
+    } catch {}
   }
+  return null;
 }
 
 async function getReferencePrices() {
@@ -319,6 +336,13 @@ async function getReferencePrices() {
       referenceMap = { at: Infinity, map: prebuilt, loading: null };
       console.log(`reference prices loaded from snapshot, ${prebuilt.size} names`);
       return prebuilt;
+    }
+    if (ON_VERCEL) {
+      // Never pull the ~50 MB dataset inside a serverless request. No
+      // snapshot means the build step needs fixing, check /api/health
+      console.error('no reference-prices snapshot on Vercel, references disabled until a deploy builds one');
+      referenceMap = { at: Infinity, map: new Map(), loading: null };
+      return referenceMap.map;
     }
   }
   const loading = (async () => {
@@ -361,6 +385,13 @@ async function getImageMap() {
       imageMap = { at: Infinity, map: prebuilt, loading: null };
       console.log(`image map loaded from snapshot, ${prebuilt.size} names`);
       return prebuilt;
+    }
+    if (ON_VERCEL) {
+      // Never pull ~100 MB of datasets inside a serverless request. No
+      // snapshot means the build step needs fixing, check /api/health
+      console.error('no image-map snapshot on Vercel, image fallback disabled until a deploy builds one');
+      imageMap = { at: Infinity, map: new Map(), loading: null };
+      return imageMap.map;
     }
   }
   const loading = (async () => {
@@ -515,19 +546,29 @@ function mergeSources(sourceItems, volumes, images, references) {
 
 const CSFLOAT_ENABLED = MOCK || Boolean(CSFLOAT_API_KEY);
 
+// Non-blocking peeks: kick the load off and use whatever is available right
+// now. Snapshot loads complete synchronously, live downloads fill in for a
+// later refresh. Deal responses must never wait on enrichment data.
+function peekImages() {
+  getImageMap().catch(() => {});
+  return imageMap.map || new Map();
+}
+function peekReferences() {
+  getReferencePrices().catch(() => {});
+  return referenceMap.map || new Map();
+}
+
 async function buildPayload() {
   const tasks = {
     dmarket: MOCK ? fetchDMarketMock() : fetchDMarket(),
     skinport: MOCK ? fetchSkinportMock() : fetchSkinport(),
     csfloat: CSFLOAT_ENABLED ? (MOCK ? fetchCSFloatMock() : fetchCSFloat()) : Promise.resolve([]),
   };
-  const [dm, sp, cf, volumes, images, references] = await Promise.allSettled([
+  const [dm, sp, cf, volumes] = await Promise.allSettled([
     tasks.dmarket,
     tasks.skinport,
     tasks.csfloat,
     getSalesVolumes(),
-    getImageMap(),
-    getReferencePrices(),
   ]);
 
   if (dm.status === 'rejected') console.error('DMarket failed:', dm.reason.message);
@@ -540,8 +581,9 @@ async function buildPayload() {
     csfloat: cf.status === 'fulfilled' ? cf.value : [],
   };
   const vols = volumes.status === 'fulfilled' ? volumes.value : new Map();
-  const imgs = images.status === 'fulfilled' ? images.value : new Map();
-  const refs = references.status === 'fulfilled' ? references.value : new Map();
+  // Mock stays deterministic for the smoke test, live never blocks on these
+  const imgs = MOCK ? await getImageMap() : peekImages();
+  const refs = MOCK ? await getReferencePrices() : peekReferences();
 
   const sourceStatus = (settled, items, enabled = true) => ({
     enabled,
@@ -562,6 +604,28 @@ async function buildPayload() {
     items: mergeSources(sourceItems, vols, imgs, refs),
   };
 }
+
+// Deployment diagnostics: shows whether the build-time snapshots made it
+// into the running function and which sources are enabled
+app.get('/api/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    node: process.version,
+    onVercel: ON_VERCEL,
+    mock: MOCK,
+    csfloatEnabled: CSFLOAT_ENABLED,
+    snapshots: {
+      imageMap: readPrebuilt('image-map.json') ? true : false,
+      referencePrices: readPrebuilt('reference-prices.json') ? true : false,
+    },
+    loaded: {
+      images: imageMap.map ? imageMap.map.size : 0,
+      references: referenceMap.map ? referenceMap.map.size : 0,
+      volumes: historyCache.volumes ? historyCache.volumes.size : 0,
+    },
+    dealCacheAgeSeconds: cache.at ? Math.round((Date.now() - cache.at) / 1000) : null,
+  });
+});
 
 app.get('/api/deals', async (req, res) => {
   // On Vercel the CDN honors s-maxage, giving the 5 minute cache across
