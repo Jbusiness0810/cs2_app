@@ -355,8 +355,11 @@ async function load() {
       el.textContent = 'CONNECTING... first fetch pulls live market data and can take up to a minute';
     }
   }, 4000);
+  // AbortController + setTimeout works on every browser, unlike AbortSignal.timeout
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 75000) : null;
   try {
-    const res = await fetch('/api/deals', { signal: AbortSignal.timeout(75000) });
+    const res = await fetch('/api/deals', ctrl ? { signal: ctrl.signal } : {});
     if (!res.ok) throw new Error('bad response');
     const data = await res.json();
     allItems = data.items || [];
@@ -370,8 +373,22 @@ async function load() {
     retrySoon(60000);
   } finally {
     clearTimeout(slowNote);
+    if (abortTimer) clearTimeout(abortTimer);
   }
 }
+
+// Surface any script error in the status bar so a broken browser never
+// shows a silent forever-CONNECTING page
+window.onerror = function (msg) {
+  const el = document.getElementById('status');
+  if (el) {
+    el.textContent = 'PAGE ERROR - ' + msg + ' (screenshot this)';
+    el.className = 'down';
+  }
+};
+window.onunhandledrejection = function (e) {
+  window.onerror(e.reason && e.reason.message ? e.reason.message : String(e.reason));
+};
 
 for (const id of ['search', 'minPrice', 'maxPrice', 'crossOnly', 'imgOnly', 'sort']) {
   document.getElementById(id).addEventListener('input', render);
