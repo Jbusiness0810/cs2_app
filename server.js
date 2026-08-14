@@ -14,7 +14,12 @@ const PORT = process.env.PORT || 3000;
 const MOCK = process.env.MOCK_DATA === '1';
 const ON_VERCEL = Boolean(process.env.VERCEL);
 const CSFLOAT_API_KEY = process.env.CSFLOAT_API_KEY || null;
-const FETCH_TIMEOUT_MS = 25 * 1000; // no upstream may hang the whole response
+// No upstream may hang the whole response. Healthy APIs answer in a few
+// seconds, so paged endpoints get short leashes and only the one big
+// Skinport catalog download keeps a generous one.
+const FETCH_TIMEOUT_MS = 25 * 1000;
+const PAGE_TIMEOUT_MS = 8 * 1000;
+const HISTORY_TIMEOUT_MS = 15 * 1000;
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // Skinport allows few requests per 5 min per IP. Never lower this.
 const HISTORY_TTL_MS = 30 * 60 * 1000; // sales volume moves slowly, refresh sparingly
@@ -77,16 +82,16 @@ const BUFF_SEARCH = (name) =>
 // Fetch helpers
 // ---------------------------------------------------------------------------
 
-async function fetchJson(url, headers = {}) {
+async function fetchJson(url, headers = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   let res;
   try {
     res = await fetch(url, {
       headers: { 'User-Agent': 'cs2-deal-finder/1.0', ...headers },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      throw new Error(`timeout after ${FETCH_TIMEOUT_MS / 1000}s from ${new URL(url).host}`);
+      throw new Error(`timeout after ${timeoutMs / 1000}s from ${new URL(url).host}`);
     }
     throw err;
   }
@@ -156,31 +161,55 @@ function normalizeDMarketObject(o) {
   };
 }
 
+function extractDMarketObjects(data) {
+  return Array.isArray(data.objects) ? data.objects : Array.isArray(data.items) ? data.items : [];
+}
+
+// Offset-paged endpoints can fetch all pages at once
+async function fetchDMarketPagesParallel(ep) {
+  const results = await Promise.allSettled(
+    Array.from({ length: DMARKET_PAGES }, (_, p) => fetchJson(ep.url(p), {}, PAGE_TIMEOUT_MS))
+  );
+  const failures = results.filter((r) => r.status === 'rejected');
+  if (failures.length === results.length) throw failures[0].reason;
+  return results.flatMap((r) => (r.status === 'fulfilled' ? extractDMarketObjects(r.value) : []));
+}
+
+// Cursor pagination is inherently sequential
+async function fetchDMarketPagesCursor(ep) {
+  const objects = [];
+  let cursor = null;
+  for (let page = 0; page < DMARKET_PAGES; page++) {
+    const data = await fetchJson(ep.url(page, cursor), {}, PAGE_TIMEOUT_MS);
+    const batch = extractDMarketObjects(data);
+    objects.push(...batch);
+    cursor = data.cursor ?? (data.paging && data.paging.cursor) ?? null;
+    if (!cursor || batch.length < DMARKET_PAGE_SIZE) break;
+  }
+  return objects;
+}
+
+// Remember which endpoint answered last so refreshes skip the dead ones
+// instead of burning a timeout on each, every 5 minutes
+let dmarketPreferred = 0;
+
 async function fetchDMarket() {
   const errors = [];
-  for (const ep of DMARKET_ENDPOINTS) {
+  for (let i = 0; i < DMARKET_ENDPOINTS.length; i++) {
+    const idx = (dmarketPreferred + i) % DMARKET_ENDPOINTS.length;
+    const ep = DMARKET_ENDPOINTS[idx];
     try {
-      const items = [];
-      let cursor = null;
-      let sampleLogged = false;
-      for (let page = 0; page < DMARKET_PAGES; page++) {
-        const data = await fetchJson(ep.url(page, cursor));
-        const objects = Array.isArray(data.objects) ? data.objects : Array.isArray(data.items) ? data.items : [];
-        if (objects.length && !sampleLogged) {
-          sampleLogged = true;
-          console.log(`DMarket via ${ep.name}, sample object: ${JSON.stringify(objects[0]).slice(0, 400)}`);
-        }
-        for (const o of objects) {
-          const it = normalizeDMarketObject(o);
-          if (it) items.push(it);
-        }
-        if (ep.cursorPaged) {
-          cursor = data.cursor ?? (data.paging && data.paging.cursor) ?? null;
-          if (!cursor) break;
-        }
-        if (objects.length < DMARKET_PAGE_SIZE) break;
+      const objects = ep.cursorPaged
+        ? await fetchDMarketPagesCursor(ep)
+        : await fetchDMarketPagesParallel(ep);
+      if (objects.length) {
+        console.log(`DMarket via ${ep.name}, sample object: ${JSON.stringify(objects[0]).slice(0, 400)}`);
       }
-      if (items.length > 0) return items;
+      const items = objects.map(normalizeDMarketObject).filter(Boolean);
+      if (items.length > 0) {
+        dmarketPreferred = idx;
+        return items;
+      }
       errors.push(`${ep.name}: 0 items`);
     } catch (err) {
       errors.push(`${ep.name}: ${err.message}`);
@@ -249,7 +278,7 @@ async function fetchCSFloat() {
       const items = [];
       let sampleLogged = false;
       for (let page = 0; page < CSFLOAT_PAGES; page++) {
-        const data = await fetchJson(CSFLOAT_URL(page, sortBy), headers);
+        const data = await fetchJson(CSFLOAT_URL(page, sortBy), headers, PAGE_TIMEOUT_MS);
         const listings = Array.isArray(data) ? data : Array.isArray(data.data) ? data.data : [];
         if (listings.length && !sampleLogged) {
           sampleLogged = true;
@@ -282,7 +311,7 @@ async function getSalesVolumes() {
   try {
     const data = MOCK
       ? readFixture('skinport_history.json')
-      : await fetchJson(SKINPORT_HISTORY_URL, { 'Accept-Encoding': 'br' });
+      : await fetchJson(SKINPORT_HISTORY_URL, { 'Accept-Encoding': 'br' }, HISTORY_TIMEOUT_MS);
     const volumes = new Map();
     for (const o of data) {
       if (!o.market_hash_name) continue;
@@ -627,6 +656,26 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// One background refresh at a time, shared by all waiting requests
+let refreshing = null;
+function refreshCache() {
+  if (!refreshing) {
+    refreshing = buildPayload()
+      .then((payload) => {
+        // Only refresh the cache clock when at least one source answered, so
+        // a total outage retries on the next request instead of caching emptiness
+        if (Object.values(payload.sources).some((s) => s.ok)) {
+          cache = { at: Date.now(), payload };
+        }
+        return payload;
+      })
+      .finally(() => {
+        refreshing = null;
+      });
+  }
+  return refreshing;
+}
+
 app.get('/api/deals', async (req, res) => {
   // On Vercel the CDN honors s-maxage, giving the 5 minute cache across
   // stateless invocations. Harmless for local single-process serving.
@@ -635,17 +684,17 @@ app.get('/api/deals', async (req, res) => {
   if (cache.payload && now - cache.at < CACHE_TTL_MS) {
     return res.json({ ...cache.payload, cached: true });
   }
+  // Expired but present: answer instantly with stale data and refresh in the
+  // background. Nobody waits on a refetch except the very first request.
+  if (cache.payload) {
+    refreshCache().catch((err) => console.error('background refresh failed:', err));
+    return res.json({ ...cache.payload, cached: true, stale: true });
+  }
   try {
-    const payload = await buildPayload();
-    // Only refresh the cache clock when at least one source answered, so a
-    // total outage retries on the next request instead of caching emptiness
-    if (Object.values(payload.sources).some((s) => s.ok)) {
-      cache = { at: now, payload };
-    }
+    const payload = await refreshCache();
     res.json({ ...payload, cached: false });
   } catch (err) {
     console.error('deal build failed:', err);
-    if (cache.payload) return res.json({ ...cache.payload, cached: true, stale: true });
     res.status(502).json({ error: 'All marketplace sources are unavailable right now' });
   }
 });
