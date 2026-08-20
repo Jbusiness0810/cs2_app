@@ -84,6 +84,18 @@
     user-select: none;
   }
   .controls input:focus, .controls select:focus { outline: 1px solid var(--gold); }
+  #dir {
+    background: var(--panel-2);
+    border: 1px solid var(--edge);
+    color: var(--text);
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 7px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #dir:hover { border-color: var(--gold); color: var(--gold); }
   #grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -261,9 +273,10 @@
     <option value="discount">Sort: Discount</option>
     <option value="popularity">Sort: Popularity</option>
     <option value="spread">Sort: Cross-market spread</option>
-    <option value="priceAsc">Sort: Price low to high</option>
-    <option value="priceDesc">Sort: Price high to low</option>
+    <option value="price">Sort: Price</option>
+    <option value="rarity">Sort: Rarity</option>
   </select>
+  <button id="dir" title="Flip sort direction" aria-label="Flip sort direction">&#8595; DESC</button>
 </div>
 
 <div id="grid"></div>
@@ -304,6 +317,7 @@ const METER_MAX = 40; // discount percent that pins the meter at the far end
 let allItems = [];
 const PAGE_SIZE = 96; // cards rendered per chunk, phones choke on thousands
 let visibleCount = PAGE_SIZE;
+let sortDir = 'desc'; // 'desc' = best first, flipped by the direction button
 
 function tierFor(discount) {
   return TIERS.find(t => discount >= t.min) || TIERS[TIERS.length - 1];
@@ -337,6 +351,11 @@ function render() {
     (!rarity || it.rarity === rarity)
   );
 
+  // Each comparator sorts best-first, the direction button flips it
+  const rarityIdx = (it) => {
+    const i = it.rarity ? RARITY_ORDER.indexOf(it.rarity) : -1;
+    return i === -1 ? RARITY_ORDER.length : i;
+  };
   const cmp = {
     discount: (a, b) => b.discount - a.discount,
     popularity: (a, b) =>
@@ -344,10 +363,11 @@ function render() {
       ((b.popularity.volume7d || 0) - (a.popularity.volume7d || 0)) ||
       (b.discount - a.discount),
     spread: (a, b) => b.spread - a.spread,
-    priceAsc: (a, b) => a.bestPrice - b.bestPrice,
-    priceDesc: (a, b) => b.bestPrice - a.bestPrice,
+    price: (a, b) => b.bestPrice - a.bestPrice,
+    rarity: (a, b) => (rarityIdx(a) - rarityIdx(b)) || (b.discount - a.discount),
   }[sort];
-  items.sort(cmp);
+  const flip = sortDir === 'asc' ? -1 : 1;
+  items.sort((a, b) => flip * cmp(a, b));
 
   const grid = document.getElementById('grid');
   document.getElementById('empty').style.display = items.length ? 'none' : 'block';
@@ -492,6 +512,11 @@ for (const id of ['crossOnly', 'imgOnly', 'rarity', 'sort']) {
 document.getElementById('more').addEventListener('click', function () {
   visibleCount += PAGE_SIZE;
   render();
+});
+document.getElementById('dir').addEventListener('click', function () {
+  sortDir = sortDir === 'desc' ? 'asc' : 'desc';
+  this.innerHTML = sortDir === 'desc' ? '&#8595; DESC' : '&#8593; ASC';
+  filtersChanged();
 });
 // Tooltips do not exist on touch screens: tapping the status line shows
 // the failed-source details instead
