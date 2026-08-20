@@ -193,6 +193,39 @@
   }
   .discount { color: var(--tier); font-family: 'Chakra Petch', sans-serif; font-weight: 700; }
   #empty { padding: 60px 24px; text-align: center; color: var(--muted); display: none; }
+  #more {
+    display: none;
+    margin: 0 auto 40px;
+    padding: 12px 34px;
+    background: var(--panel-2);
+    border: 1px solid var(--edge);
+    color: var(--text);
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  #more:hover { border-color: var(--gold); color: var(--gold); }
+  /* Any touch device: 16px inputs stop iOS focus-zoom (portrait and
+     landscape alike), and links get roomier tap targets */
+  @media (pointer: coarse) {
+    .controls input[type="text"], .controls input[type="number"], .controls select {
+      font-size: 16px;
+      padding: 9px 10px;
+    }
+    .controls label.chk { padding: 6px 0; }
+    .price-row a { padding: 6px 0 6px 16px; }
+  }
+  /* Narrow screens: tighter spacing, full-width search */
+  @media (max-width: 640px) {
+    header { padding: 14px 16px 12px; }
+    .controls { padding: 10px 16px; gap: 8px; }
+    .controls input[type="text"] { flex: 1 1 100%; width: auto; }
+    .controls input[type="number"] { width: 104px; }
+    #grid { padding: 14px 16px 28px; gap: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -218,6 +251,7 @@
 
 <div id="grid"></div>
 <div id="empty">No deals match the current filters</div>
+<button id="more">Show more</button>
 
 <script>
 const TIERS = [
@@ -232,6 +266,8 @@ const POP_LABELS = ['Dead', 'Very low', 'Low', 'Moderate', 'High', 'Very high'];
 const METER_MAX = 40; // discount percent that pins the meter at the far end
 
 let allItems = [];
+const PAGE_SIZE = 96; // cards rendered per chunk, phones choke on thousands
+let visibleCount = PAGE_SIZE;
 
 function tierFor(discount) {
   return TIERS.find(t => discount >= t.min) || TIERS[TIERS.length - 1];
@@ -277,7 +313,11 @@ function render() {
 
   const grid = document.getElementById('grid');
   document.getElementById('empty').style.display = items.length ? 'none' : 'block';
-  grid.innerHTML = items.map(it => {
+  const shown = items.slice(0, visibleCount);
+  const moreBtn = document.getElementById('more');
+  moreBtn.style.display = items.length > shown.length ? 'block' : 'none';
+  moreBtn.textContent = `Show more (${items.length - shown.length} hidden)`;
+  grid.innerHTML = shown.map(it => {
     const tier = tierFor(it.discount);
     const pin = Math.min(it.discount / METER_MAX, 1) * 100;
     const rows = it.listings.map(l => `
@@ -301,7 +341,7 @@ function render() {
     <div class="card" style="--tier:${tier.color}">
       <a class="itemlink" href="${esc(it.bestUrl)}" target="_blank" rel="noopener" title="Open the best priced listing">
         <div class="thumb">${it.image
-          ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
+          ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
           : '<div class="noimg">NO PREVIEW</div>'}</div>
       </a>
       <div class="body">
@@ -328,7 +368,9 @@ function setStatus(data) {
   const up = enabled.filter(([, s]) => s.ok).map(([k]) => SOURCE_LABEL[k] || k);
   const failed = enabled.filter(([, s]) => !s.ok && s.error);
   el.title = failed.map(([k, s]) => `${SOURCE_LABEL[k] || k}: ${s.error}`).join('\n');
-  const n = data.items.length;
+  const n = data.totalBeforeCap > data.items.length
+    ? `top ${data.items.length} of ${data.totalBeforeCap}`
+    : data.items.length;
   const tag = data.mock ? 'MOCK DATA' : 'LIVE';
   if (up.length === enabled.length && up.length > 0) {
     el.textContent = `${tag} - ${up.join(' + ')} | ${n} items`;
@@ -390,9 +432,31 @@ window.onunhandledrejection = function (e) {
   window.onerror(e.reason && e.reason.message ? e.reason.message : String(e.reason));
 };
 
-for (const id of ['search', 'minPrice', 'maxPrice', 'crossOnly', 'imgOnly', 'sort']) {
-  document.getElementById(id).addEventListener('input', render);
+// Typing is debounced so phones do not re-render the grid per keystroke.
+// Checkboxes and the sort select apply instantly.
+let debounceTimer = null;
+function filtersChanged() {
+  visibleCount = PAGE_SIZE;
+  render();
 }
+for (const id of ['search', 'minPrice', 'maxPrice']) {
+  document.getElementById(id).addEventListener('input', function () {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(filtersChanged, 150);
+  });
+}
+for (const id of ['crossOnly', 'imgOnly', 'sort']) {
+  document.getElementById(id).addEventListener('input', filtersChanged);
+}
+document.getElementById('more').addEventListener('click', function () {
+  visibleCount += PAGE_SIZE;
+  render();
+});
+// Tooltips do not exist on touch screens: tapping the status line shows
+// the failed-source details instead
+document.getElementById('status').addEventListener('click', function () {
+  if (this.title) alert(this.title);
+});
 load();
 setInterval(load, 5 * 60 * 1000);
 </script>

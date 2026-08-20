@@ -68,6 +68,10 @@ npm test
 
 Boots the server in mock mode and asserts the /api/deals response shape, the cross-market merge, the discount fallback logic, and the cache.
 
+## Mobile
+
+The app is audited for phones: the server caps the merged list at 800 items (all cross-listed items always survive the cut, raise with the `MAX_ITEMS` env var), cards render in chunks of 96 behind a Show more button, search input is debounced, inputs are 16px on touch devices so iOS does not zoom the page on focus, and tapping the status line shows failed-source details since tooltips do not exist on touch screens.
+
 ## How it works
 
 - The server pulls 3 pages (100 items each) of listings from DMarket and the full Skinport item list, then merges the two by exact item name. DMarket retired its old exchange endpoint with HTTP 410, so the fetcher tries a chain of endpoints (current offers/v1/search first) and logs which one answered plus a sample object for field verification.

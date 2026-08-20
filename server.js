@@ -21,6 +21,11 @@ const FETCH_TIMEOUT_MS = 25 * 1000;
 const PAGE_TIMEOUT_MS = 8 * 1000;
 const HISTORY_TIMEOUT_MS = 15 * 1000;
 
+// Cap the merged list: phones cannot download or render the full ~20k item
+// catalog. Cross-listed items always survive the cut, the rest is kept by
+// best discount. Raise via env if you want more on desktop.
+const MAX_ITEMS = Number(process.env.MAX_ITEMS) > 0 ? Number(process.env.MAX_ITEMS) : 800;
+
 const CACHE_TTL_MS = 5 * 60 * 1000; // Skinport allows few requests per 5 min per IP. Never lower this.
 const HISTORY_TTL_MS = 30 * 60 * 1000; // sales volume moves slowly, refresh sparingly
 const IMAGES_TTL_MS = 24 * 60 * 60 * 1000;
@@ -566,7 +571,17 @@ function mergeSources(sourceItems, volumes, images, references) {
   }
 
   items.sort((a, b) => b.discount - a.discount);
-  return items;
+  if (items.length <= MAX_ITEMS) return { items, totalBeforeCap: items.length };
+
+  // Keep every cross-listed item (the whole point of the app), fill the
+  // remainder with the best single-source discounts
+  const kept = items.filter((it) => it.crossListed);
+  for (const it of items) {
+    if (kept.length >= Math.max(MAX_ITEMS, kept.length)) break;
+    if (!it.crossListed) kept.push(it);
+  }
+  kept.sort((a, b) => b.discount - a.discount);
+  return { items: kept, totalBeforeCap: items.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -621,6 +636,8 @@ async function buildPayload() {
     error: enabled && settled.status === 'rejected' ? settled.reason.message : null,
   });
 
+  const merged = mergeSources(sourceItems, vols, imgs, refs);
+
   return {
     mock: MOCK,
     fetchedAt: new Date().toISOString(),
@@ -630,7 +647,9 @@ async function buildPayload() {
       csfloat: sourceStatus(cf, sourceItems.csfloat, CSFLOAT_ENABLED),
     },
     referenceCount: refs.size,
-    items: mergeSources(sourceItems, vols, imgs, refs),
+    itemCap: MAX_ITEMS,
+    totalBeforeCap: merged.totalBeforeCap,
+    items: merged.items,
   };
 }
 

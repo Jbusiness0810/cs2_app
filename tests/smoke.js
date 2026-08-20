@@ -110,6 +110,33 @@ async function waitForServer() {
   const data2 = await res2.json();
   assert(data2.cached === true, 'second request should hit the cache');
 
+  // Item cap: with MAX_ITEMS=5 the list is capped but every cross-listed
+  // item survives the cut
+  const CAP_PORT = PORT + 1;
+  const capServer = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+    env: { ...process.env, MOCK_DATA: '1', PORT: String(CAP_PORT), MAX_ITEMS: '5' },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  try {
+    let capData = null;
+    for (let i = 0; i < 40 && !capData; i++) {
+      try {
+        const r = await fetch(`http://localhost:${CAP_PORT}/api/deals`);
+        if (r.ok) capData = await r.json();
+      } catch {}
+      if (!capData) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert(capData, 'capped server did not start');
+    assert(capData.items.length === 5, `capped list should have 5 items, got ${capData.items.length}`);
+    assert(capData.totalBeforeCap === data.items.length, `totalBeforeCap should be ${data.items.length}, got ${capData.totalBeforeCap}`);
+    const crossListedNames = data.items.filter((i) => i.crossListed).map((i) => i.name);
+    for (const name of crossListedNames) {
+      assert(capData.items.find((i) => i.name === name), `cross-listed ${name} should survive the cap`);
+    }
+  } finally {
+    capServer.kill();
+  }
+
   console.log(`PASS: ${data.items.length} merged items, all assertions ok`);
   server.kill();
   process.exit(0);
