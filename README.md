@@ -78,6 +78,7 @@ The app is audited for phones: the server caps the merged list at 800 items (all
 - The cheapest source wins per item. Discount is computed against the suggested price, falling back to the highest listed price when no suggested price exists.
 - Results are cached for 5 minutes. Skinport rate limits to roughly 1 request per 5 minutes per IP, so never remove the cache.
 - Deals are graded with CS2 rarity tiers: Consumer (0%+), Mil-Spec (5%+), Restricted (12%+), Classified (20%+), Covert (30%+).
+- Every item also carries its actual skin rarity (Covert, Classified, Extraordinary for gloves, and so on) from the ByMykel dataset, shown as a colored tag on the card image and filterable through the rarity dropdown.
 - Aggregated reference prices come from the CSGOTrader price dataset (one fetch, cached 6 hours): each card shows Steam and Buff163 reference rows with links, and the discount falls back to the Buff163 then Steam reference when a marketplace publishes no suggested price. Live per-item Steam priceoverview calls were deliberately skipped, they get IPs rate banned fast and the aggregated dataset already covers Steam prices.
 - Float values show on cards when DMarket or CSFloat provides them.
 - Every item gets a 0 to 5 popularity rating from Skinport 7-day sales volume (refreshed every 30 minutes), falling back to total listing counts when an item has no sales history.

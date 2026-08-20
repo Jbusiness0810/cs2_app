@@ -74,6 +74,12 @@ async function waitForServer() {
   assert(usp, 'USP-S should be present');
   assert(Math.abs(usp.discount - 10.3) < 0.1, `USP-S discount should be ~10.3 vs Buff163 68, got ${usp.discount}`);
 
+  // Rarity comes from the catalog fixture
+  assert(ak.rarity === 'Classified' && ak.rarityColor === '#d32ce6',
+    `AK-47 rarity should be Classified #d32ce6, got ${ak.rarity} ${ak.rarityColor}`);
+  const gloves2 = data.items.find((i) => i.name === "Sport Gloves | Pandora's Box (Field-Tested)");
+  assert(gloves2.rarity === 'Extraordinary', `Gloves rarity should be Extraordinary, got ${gloves2.rarity}`);
+
   // CSFloat-only item carries its float value and links to csfloat
   const kara = data.items.find((i) => i.name === 'Karambit | Tiger Tooth (Factory New)');
   assert(kara, 'Karambit should be present');

@@ -1,6 +1,7 @@
 // Build-time data precompute for serverless deploys (and faster local starts).
-// Fetches the big upstream datasets once and reduces them to two small files:
+// Fetches the big upstream datasets once and reduces them to small files:
 //   data/image-map.json         market_hash_name -> image URL
+//   data/rarity-map.json        market_hash_name -> [rarity name, color]
 //   data/reference-prices.json  market_hash_name -> { steam, buff }
 // The server loads these from disk when present instead of fetching tens of
 // megabytes at runtime, which serverless cold starts cannot afford.
@@ -26,17 +27,33 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function buildImageMap() {
-  const map = {};
+// The weapon tiers carry a redundant Grade suffix, sticker and agent tiers
+// do not ("High Grade" is a real sticker tier, leave it alone)
+const RARITY_RENAME = {
+  'Consumer Grade': 'Consumer',
+  'Industrial Grade': 'Industrial',
+  'Mil-Spec Grade': 'Mil-Spec',
+};
+
+async function buildCatalogMaps() {
+  const images = {};
+  const rarities = {};
   let sources = 0;
   for (const url of IMAGE_DATASETS) {
     try {
       const data = await fetchJson(url);
       let added = 0;
       for (const o of Array.isArray(data) ? data : Object.values(data)) {
-        if (o && o.market_hash_name && o.image && !map[o.market_hash_name]) {
-          map[o.market_hash_name] = o.image;
+        if (!o || !o.market_hash_name) continue;
+        if (o.image && !images[o.market_hash_name]) {
+          images[o.market_hash_name] = o.image;
           added++;
+        }
+        if (o.rarity && o.rarity.name && !rarities[o.market_hash_name]) {
+          rarities[o.market_hash_name] = [
+            RARITY_RENAME[o.rarity.name] || o.rarity.name,
+            o.rarity.color || null,
+          ];
         }
       }
       sources++;
@@ -46,7 +63,7 @@ async function buildImageMap() {
     }
   }
   if (sources === 0) return null;
-  return map;
+  return { images, rarities };
 }
 
 async function buildReferencePrices() {
@@ -77,13 +94,15 @@ async function buildReferencePrices() {
 (async () => {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  console.log('building image map...');
-  const images = await buildImageMap();
-  if (images) {
-    fs.writeFileSync(path.join(OUT_DIR, 'image-map.json'), JSON.stringify(images));
-    console.log(`wrote data/image-map.json (${Object.keys(images).length} names)`);
+  console.log('building image and rarity maps...');
+  const catalog = await buildCatalogMaps();
+  if (catalog) {
+    fs.writeFileSync(path.join(OUT_DIR, 'image-map.json'), JSON.stringify(catalog.images));
+    console.log(`wrote data/image-map.json (${Object.keys(catalog.images).length} names)`);
+    fs.writeFileSync(path.join(OUT_DIR, 'rarity-map.json'), JSON.stringify(catalog.rarities));
+    console.log(`wrote data/rarity-map.json (${Object.keys(catalog.rarities).length} names)`);
   } else {
-    console.error('image map skipped, server will fetch at runtime');
+    console.error('catalog maps skipped, server will fetch at runtime');
   }
 
   console.log('building reference prices...');

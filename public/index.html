@@ -102,11 +102,25 @@
   }
   .card:hover { transform: translateY(-2px); }
   .thumb {
+    position: relative;
     height: 140px;
     background: radial-gradient(ellipse at center, #1d2a39 0%, #121b25 100%);
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+  .raritytag {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-family: 'Chakra Petch', sans-serif;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 2px;
+    background: rgba(10, 16, 22, .75);
+    border: 1px solid currentColor;
   }
   .thumb img { max-width: 90%; max-height: 130px; object-fit: contain; }
   .noimg {
@@ -240,6 +254,9 @@
   <input type="number" id="maxPrice" placeholder="Max $" min="0" step="0.01">
   <label class="chk"><input type="checkbox" id="crossOnly"> Cross-listed only</label>
   <label class="chk"><input type="checkbox" id="imgOnly"> With images only</label>
+  <select id="rarity">
+    <option value="">All rarities</option>
+  </select>
   <select id="sort">
     <option value="discount">Sort: Discount</option>
     <option value="popularity">Sort: Popularity</option>
@@ -263,6 +280,25 @@ const TIERS = [
 ];
 const SOURCE_LABEL = { dmarket: 'DMarket', skinport: 'Skinport', csfloat: 'CSFloat' };
 const POP_LABELS = ['Dead', 'Very low', 'Low', 'Moderate', 'High', 'Very high'];
+// Canonical CS2 rarity order for the filter dropdown, unknown tiers follow alphabetically
+const RARITY_ORDER = ['Contraband', 'Extraordinary', 'Covert', 'Classified', 'Restricted', 'Mil-Spec', 'Industrial', 'Consumer'];
+
+function populateRarityFilter() {
+  const sel = document.getElementById('rarity');
+  const current = sel.value;
+  const present = {};
+  for (const it of allItems) if (it.rarity) present[it.rarity] = true;
+  const names = Object.keys(present).sort((a, b) => {
+    const ia = RARITY_ORDER.indexOf(a), ib = RARITY_ORDER.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  sel.innerHTML = '<option value="">All rarities</option>' +
+    names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if (current && names.indexOf(current) !== -1) sel.value = current;
+}
 const METER_MAX = 40; // discount percent that pins the meter at the far end
 
 let allItems = [];
@@ -289,6 +325,7 @@ function render() {
   const max = parseFloat(document.getElementById('maxPrice').value);
   const crossOnly = document.getElementById('crossOnly').checked;
   const imgOnly = document.getElementById('imgOnly').checked;
+  const rarity = document.getElementById('rarity').value;
   const sort = document.getElementById('sort').value;
 
   let items = allItems.filter(it =>
@@ -296,7 +333,8 @@ function render() {
     (isNaN(min) || it.bestPrice >= min) &&
     (isNaN(max) || it.bestPrice <= max) &&
     (!crossOnly || it.crossListed) &&
-    (!imgOnly || it.image)
+    (!imgOnly || it.image) &&
+    (!rarity || it.rarity === rarity)
   );
 
   const cmp = {
@@ -342,7 +380,9 @@ function render() {
       <a class="itemlink" href="${esc(it.bestUrl)}" target="_blank" rel="noopener" title="Open the best priced listing">
         <div class="thumb">${it.image
           ? `<img src="${esc(it.image)}" alt="${esc(it.name)}" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'noimg\\'>NO PREVIEW</div>'">`
-          : '<div class="noimg">NO PREVIEW</div>'}</div>
+          : '<div class="noimg">NO PREVIEW</div>'}${it.rarity
+          ? `<span class="raritytag" style="color:${esc(it.rarityColor || '#b0c3d9')}">${esc(it.rarity)}</span>`
+          : ''}</div>
       </a>
       <div class="body">
         <div class="grade">${tier.name} Deal</div>
@@ -405,6 +445,7 @@ async function load() {
     if (!res.ok) throw new Error('bad response');
     const data = await res.json();
     allItems = data.items || [];
+    populateRarityFilter();
     setStatus(data);
     render();
     const anyUp = Object.values(data.sources).some(s => s.enabled !== false && s.ok);
@@ -445,7 +486,7 @@ for (const id of ['search', 'minPrice', 'maxPrice']) {
     debounceTimer = setTimeout(filtersChanged, 150);
   });
 }
-for (const id of ['crossOnly', 'imgOnly', 'sort']) {
+for (const id of ['crossOnly', 'imgOnly', 'rarity', 'sort']) {
   document.getElementById(id).addEventListener('input', filtersChanged);
 }
 document.getElementById('more').addEventListener('click', function () {

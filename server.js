@@ -407,42 +407,66 @@ async function getReferencePrices() {
   return loading;
 }
 
-// market_hash_name to image URL map, loaded lazily, refreshed daily.
-// Soft-fails to an empty map, cards then show the NO PREVIEW placeholder.
-async function getImageMap() {
+// market_hash_name to image URL and rarity maps, loaded lazily, refreshed
+// daily. Soft-fails to empty maps, cards then show the NO PREVIEW
+// placeholder and carry no rarity tag.
+const RARITY_RENAME = {
+  'Consumer Grade': 'Consumer',
+  'Industrial Grade': 'Industrial',
+  'Mil-Spec Grade': 'Mil-Spec',
+};
+
+function emptyCatalog() {
+  return { images: new Map(), rarities: new Map() };
+}
+
+async function getCatalog() {
   const now = Date.now();
   if (imageMap.map && now - imageMap.at < IMAGES_TTL_MS) return imageMap.map;
   if (imageMap.loading) return imageMap.loading;
-  if (!MOCK && !imageMap.map) {
-    const prebuilt = readPrebuilt('image-map.json');
-    if (prebuilt) {
-      imageMap = { at: Infinity, map: prebuilt, loading: null };
-      console.log(`image map loaded from snapshot, ${prebuilt.size} names`);
-      return prebuilt;
+  if (!imageMap.map) {
+    if (MOCK) {
+      const rarities = new Map(Object.entries(readFixture('rarity.json')));
+      imageMap = { at: Infinity, map: { images: new Map(), rarities }, loading: null };
+      return imageMap.map;
+    }
+    const images = readPrebuilt('image-map.json');
+    if (images) {
+      const rarities = readPrebuilt('rarity-map.json') || new Map();
+      imageMap = { at: Infinity, map: { images, rarities }, loading: null };
+      console.log(`catalog loaded from snapshot, ${images.size} images, ${rarities.size} rarities`);
+      return imageMap.map;
     }
     if (ON_VERCEL) {
       // Never pull ~100 MB of datasets inside a serverless request. No
       // snapshot means the build step needs fixing, check /api/health
-      console.error('no image-map snapshot on Vercel, image fallback disabled until a deploy builds one');
-      imageMap = { at: Infinity, map: new Map(), loading: null };
+      console.error('no catalog snapshot on Vercel, images and rarities disabled until a deploy builds one');
+      imageMap = { at: Infinity, map: emptyCatalog(), loading: null };
       return imageMap.map;
     }
   }
   const loading = (async () => {
-    const map = new Map();
-    if (!MOCK) {
-      for (const url of IMAGE_DATASETS) {
-        try {
-          const data = await fetchJson(url);
-          for (const o of Array.isArray(data) ? data : Object.values(data)) {
-            if (o && o.market_hash_name && o.image) map.set(o.market_hash_name, o.image);
+    const map = emptyCatalog();
+    for (const url of IMAGE_DATASETS) {
+      try {
+        const data = await fetchJson(url);
+        for (const o of Array.isArray(data) ? data : Object.values(data)) {
+          if (!o || !o.market_hash_name) continue;
+          if (o.image && !map.images.has(o.market_hash_name)) {
+            map.images.set(o.market_hash_name, o.image);
           }
-        } catch (err) {
-          console.error(`image dataset failed (${url.split('/').pop()}):`, err.message);
+          if (o.rarity && o.rarity.name && !map.rarities.has(o.market_hash_name)) {
+            map.rarities.set(o.market_hash_name, [
+              RARITY_RENAME[o.rarity.name] || o.rarity.name,
+              o.rarity.color || null,
+            ]);
+          }
         }
+      } catch (err) {
+        console.error(`catalog dataset failed (${url.split('/').pop()}):`, err.message);
       }
-      if (map.size) console.log(`image map loaded, ${map.size} names`);
     }
+    if (map.images.size) console.log(`catalog loaded, ${map.images.size} images, ${map.rarities.size} rarities`);
     imageMap = { at: Date.now(), map, loading: null };
     return map;
   })();
@@ -504,7 +528,7 @@ function popularityFor(volume7d, listings) {
   return { score: 0, basis: 'none' };
 }
 
-function mergeSources(sourceItems, volumes, images, references) {
+function mergeSources(sourceItems, volumes, catalog, references) {
   const byName = new Map();
 
   const add = (source, item) => {
@@ -548,6 +572,7 @@ function mergeSources(sourceItems, volumes, images, references) {
 
     const vol = volumes.get(entry.name);
     const popularity = popularityFor(vol ? vol.volume7d : null, entry.listings || null);
+    const rarity = catalog.rarities.get(entry.name) || null;
 
     const refs = [];
     if (ref.steam) refs.push({ label: 'Steam', price: ref.steam, url: STEAM_LISTING(entry.name) });
@@ -555,7 +580,9 @@ function mergeSources(sourceItems, volumes, images, references) {
 
     items.push({
       name: entry.name,
-      image: entry.image || images.get(entry.name) || null,
+      image: entry.image || catalog.images.get(entry.name) || null,
+      rarity: rarity ? rarity[0] : null,
+      rarityColor: rarity ? rarity[1] : null,
       float: entry.float,
       bestPrice: best.price,
       bestSource: best.source,
@@ -593,9 +620,9 @@ const CSFLOAT_ENABLED = MOCK || Boolean(CSFLOAT_API_KEY);
 // Non-blocking peeks: kick the load off and use whatever is available right
 // now. Snapshot loads complete synchronously, live downloads fill in for a
 // later refresh. Deal responses must never wait on enrichment data.
-function peekImages() {
-  getImageMap().catch(() => {});
-  return imageMap.map || new Map();
+function peekCatalog() {
+  getCatalog().catch(() => {});
+  return imageMap.map || emptyCatalog();
 }
 function peekReferences() {
   getReferencePrices().catch(() => {});
@@ -626,7 +653,7 @@ async function buildPayload() {
   };
   const vols = volumes.status === 'fulfilled' ? volumes.value : new Map();
   // Mock stays deterministic for the smoke test, live never blocks on these
-  const imgs = MOCK ? await getImageMap() : peekImages();
+  const cat = MOCK ? await getCatalog() : peekCatalog();
   const refs = MOCK ? await getReferencePrices() : peekReferences();
 
   const sourceStatus = (settled, items, enabled = true) => ({
@@ -636,7 +663,7 @@ async function buildPayload() {
     error: enabled && settled.status === 'rejected' ? settled.reason.message : null,
   });
 
-  const merged = mergeSources(sourceItems, vols, imgs, refs);
+  const merged = mergeSources(sourceItems, vols, cat, refs);
 
   return {
     mock: MOCK,
@@ -664,10 +691,12 @@ app.get('/api/health', (req, res) => {
     csfloatEnabled: CSFLOAT_ENABLED,
     snapshots: {
       imageMap: readPrebuilt('image-map.json') ? true : false,
+      rarityMap: readPrebuilt('rarity-map.json') ? true : false,
       referencePrices: readPrebuilt('reference-prices.json') ? true : false,
     },
     loaded: {
-      images: imageMap.map ? imageMap.map.size : 0,
+      images: imageMap.map ? imageMap.map.images.size : 0,
+      rarities: imageMap.map ? imageMap.map.rarities.size : 0,
       references: referenceMap.map ? referenceMap.map.size : 0,
       volumes: historyCache.volumes ? historyCache.volumes.size : 0,
     },
@@ -727,7 +756,7 @@ if (require.main === module) {
     console.log(`CS2 Deal Finder running at http://localhost:${PORT}${MOCK ? ' (mock data mode)' : ''}`);
     if (!CSFLOAT_ENABLED) console.log('CSFloat disabled, set CSFLOAT_API_KEY to enable it as a third source');
     if (!MOCK) {
-      getImageMap(); // start warming the image map right away
+      getCatalog(); // start warming the image and rarity maps right away
       getReferencePrices();
     }
   });
