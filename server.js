@@ -598,17 +598,36 @@ function mergeSources(sourceItems, volumes, catalog, references) {
   }
 
   items.sort((a, b) => b.discount - a.discount);
-  if (items.length <= MAX_ITEMS) return { items, totalBeforeCap: items.length };
+  return items;
+}
 
-  // Keep every cross-listed item (the whole point of the app), fill the
-  // remainder with the best single-source discounts
+// Cap a (possibly filtered) list for the response: keep every cross-listed
+// item (the whole point of the app), fill the remainder with the best
+// single-source discounts
+function capItems(items) {
+  if (items.length <= MAX_ITEMS) return items;
   const kept = items.filter((it) => it.crossListed);
   for (const it of items) {
     if (kept.length >= Math.max(MAX_ITEMS, kept.length)) break;
     if (!it.crossListed) kept.push(it);
   }
   kept.sort((a, b) => b.discount - a.discount);
-  return { items: kept, totalBeforeCap: items.length };
+  return kept;
+}
+
+// Shape the cached full payload for one response: optional rarity filter
+// runs over the FULL merged list before capping, so a filtered view is as
+// deep as an unfiltered one
+function shapePayload(base, rarity, extra) {
+  let items = base.items;
+  if (rarity) items = items.filter((it) => it.rarity === rarity);
+  return {
+    ...base,
+    ...extra,
+    rarityFilter: rarity || null,
+    totalBeforeCap: items.length,
+    items: capItems(items),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +683,10 @@ async function buildPayload() {
   });
 
   const merged = mergeSources(sourceItems, vols, cat, refs);
+  const rarityCounts = {};
+  for (const it of merged) {
+    if (it.rarity) rarityCounts[it.rarity] = (rarityCounts[it.rarity] || 0) + 1;
+  }
 
   return {
     mock: MOCK,
@@ -675,8 +698,8 @@ async function buildPayload() {
     },
     referenceCount: refs.size,
     itemCap: MAX_ITEMS,
-    totalBeforeCap: merged.totalBeforeCap,
-    items: merged.items,
+    rarityCounts,
+    items: merged, // full list, capped per response in shapePayload
   };
 }
 
@@ -726,21 +749,24 @@ function refreshCache() {
 
 app.get('/api/deals', async (req, res) => {
   // On Vercel the CDN honors s-maxage, giving the 5 minute cache across
-  // stateless invocations. Harmless for local single-process serving.
+  // stateless invocations (keyed per query string, so each rarity filter
+  // caches separately). Harmless for local single-process serving.
   res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+  const rarity =
+    typeof req.query.rarity === 'string' && req.query.rarity.length <= 40 ? req.query.rarity : '';
   const now = Date.now();
   if (cache.payload && now - cache.at < CACHE_TTL_MS) {
-    return res.json({ ...cache.payload, cached: true });
+    return res.json(shapePayload(cache.payload, rarity, { cached: true }));
   }
   // Expired but present: answer instantly with stale data and refresh in the
   // background. Nobody waits on a refetch except the very first request.
   if (cache.payload) {
     refreshCache().catch((err) => console.error('background refresh failed:', err));
-    return res.json({ ...cache.payload, cached: true, stale: true });
+    return res.json(shapePayload(cache.payload, rarity, { cached: true, stale: true }));
   }
   try {
     const payload = await refreshCache();
-    res.json({ ...payload, cached: false });
+    res.json(shapePayload(payload, rarity, { cached: false }));
   } catch (err) {
     console.error('deal build failed:', err);
     res.status(502).json({ error: 'All marketplace sources are unavailable right now' });

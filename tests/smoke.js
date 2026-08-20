@@ -116,6 +116,15 @@ async function waitForServer() {
   const data2 = await res2.json();
   assert(data2.cached === true, 'second request should hit the cache');
 
+  // Server-side rarity filter runs over the full merged list
+  const resRarity = await fetch(`http://localhost:${PORT}/api/deals?rarity=Classified`);
+  const rarityData = await resRarity.json();
+  assert(rarityData.items.length === 2 && rarityData.items.every((i) => i.rarity === 'Classified'),
+    `rarity=Classified should return exactly the 2 Classified items, got ${rarityData.items.length}`);
+  assert(rarityData.totalBeforeCap === 2, `rarity filter totalBeforeCap should be 2, got ${rarityData.totalBeforeCap}`);
+  assert(rarityData.rarityCounts && rarityData.rarityCounts.Covert === 7,
+    `rarityCounts.Covert should be 7 from the full list, got ${JSON.stringify(rarityData.rarityCounts)}`);
+
   // Item cap: with MAX_ITEMS=5 the list is capped but every cross-listed
   // item survives the cut
   const CAP_PORT = PORT + 1;
