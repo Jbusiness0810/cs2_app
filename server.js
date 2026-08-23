@@ -513,6 +513,16 @@ async function fetchCSFloatMock() {
 // computed against the best reference price available.
 // ---------------------------------------------------------------------------
 
+// Item type from the market hash name. Souvenir skins carry a "Souvenir "
+// prefix (souvenir packages do not, they end with "Souvenir Package" and
+// classify as normal). Knives and gloves carry the star.
+function classifyType(name) {
+  if (name.startsWith('Souvenir ')) return 'souvenir';
+  if (name.startsWith('★')) return 'special';
+  if (name.includes('StatTrak™')) return 'stattrak';
+  return 'normal';
+}
+
 // 0 to 5 popularity from 7-day sales volume, with total listing count as a
 // weaker fallback signal when volume data is missing for an item
 function popularityFor(volume7d, listings) {
@@ -580,6 +590,7 @@ function mergeSources(sourceItems, volumes, catalog, references) {
 
     items.push({
       name: entry.name,
+      type: classifyType(entry.name),
       image: entry.image || catalog.images.get(entry.name) || null,
       rarity: rarity ? rarity[0] : null,
       rarityColor: rarity ? rarity[1] : null,
@@ -618,13 +629,15 @@ function capItems(items) {
 // Shape the cached full payload for one response: optional rarity filter
 // runs over the FULL merged list before capping, so a filtered view is as
 // deep as an unfiltered one
-function shapePayload(base, rarity, extra) {
+function shapePayload(base, rarity, type, extra) {
   let items = base.items;
   if (rarity) items = items.filter((it) => it.rarity === rarity);
+  if (type) items = items.filter((it) => it.type === type);
   return {
     ...base,
     ...extra,
     rarityFilter: rarity || null,
+    typeFilter: type || null,
     totalBeforeCap: items.length,
     items: capItems(items),
   };
@@ -684,8 +697,10 @@ async function buildPayload() {
 
   const merged = mergeSources(sourceItems, vols, cat, refs);
   const rarityCounts = {};
+  const typeCounts = {};
   for (const it of merged) {
     if (it.rarity) rarityCounts[it.rarity] = (rarityCounts[it.rarity] || 0) + 1;
+    typeCounts[it.type] = (typeCounts[it.type] || 0) + 1;
   }
 
   return {
@@ -699,6 +714,7 @@ async function buildPayload() {
     referenceCount: refs.size,
     itemCap: MAX_ITEMS,
     rarityCounts,
+    typeCounts,
     items: merged, // full list, capped per response in shapePayload
   };
 }
@@ -754,19 +770,21 @@ app.get('/api/deals', async (req, res) => {
   res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
   const rarity =
     typeof req.query.rarity === 'string' && req.query.rarity.length <= 40 ? req.query.rarity : '';
+  const TYPES = ['souvenir', 'stattrak', 'special', 'normal'];
+  const type = TYPES.indexOf(req.query.type) !== -1 ? req.query.type : '';
   const now = Date.now();
   if (cache.payload && now - cache.at < CACHE_TTL_MS) {
-    return res.json(shapePayload(cache.payload, rarity, { cached: true }));
+    return res.json(shapePayload(cache.payload, rarity, type, { cached: true }));
   }
   // Expired but present: answer instantly with stale data and refresh in the
   // background. Nobody waits on a refetch except the very first request.
   if (cache.payload) {
     refreshCache().catch((err) => console.error('background refresh failed:', err));
-    return res.json(shapePayload(cache.payload, rarity, { cached: true, stale: true }));
+    return res.json(shapePayload(cache.payload, rarity, type, { cached: true, stale: true }));
   }
   try {
     const payload = await refreshCache();
-    res.json(shapePayload(payload, rarity, { cached: false }));
+    res.json(shapePayload(payload, rarity, type, { cached: false }));
   } catch (err) {
     console.error('deal build failed:', err);
     res.status(502).json({ error: 'All marketplace sources are unavailable right now' });

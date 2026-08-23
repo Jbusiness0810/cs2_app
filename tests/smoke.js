@@ -122,8 +122,27 @@ async function waitForServer() {
   assert(rarityData.items.length === 2 && rarityData.items.every((i) => i.rarity === 'Classified'),
     `rarity=Classified should return exactly the 2 Classified items, got ${rarityData.items.length}`);
   assert(rarityData.totalBeforeCap === 2, `rarity filter totalBeforeCap should be 2, got ${rarityData.totalBeforeCap}`);
-  assert(rarityData.rarityCounts && rarityData.rarityCounts.Covert === 7,
-    `rarityCounts.Covert should be 7 from the full list, got ${JSON.stringify(rarityData.rarityCounts)}`);
+  assert(rarityData.rarityCounts && rarityData.rarityCounts.Covert === 8,
+    `rarityCounts.Covert should be 8 from the full list, got ${JSON.stringify(rarityData.rarityCounts)}`);
+
+  // Server-side type filter: souvenirs only, with the underlisted one
+  // (no suggested price) discounted against its Buff163 reference
+  const resSouvenir = await fetch(`http://localhost:${PORT}/api/deals?type=souvenir`);
+  const souvenirData = await resSouvenir.json();
+  assert(souvenirData.items.length === 2 && souvenirData.items.every((i) => i.type === 'souvenir'),
+    `type=souvenir should return exactly 2 souvenir items, got ${souvenirData.items.length}`);
+  const safari = souvenirData.items.find((i) => i.name === 'Souvenir AWP | Safari Mesh (Field-Tested)');
+  assert(safari, 'Souvenir Safari Mesh should be present');
+  assert(Math.abs(safari.discount - 60) < 0.1,
+    `Safari Mesh discount should be 60 (4.20 vs Buff163 10.50), got ${safari.discount}`);
+  assert(souvenirData.typeCounts && souvenirData.typeCounts.souvenir === 2,
+    `typeCounts.souvenir should be 2, got ${JSON.stringify(souvenirData.typeCounts)}`);
+
+  // Type and rarity combine
+  const resCombo = await fetch(`http://localhost:${PORT}/api/deals?type=souvenir&rarity=Covert`);
+  const comboData = await resCombo.json();
+  assert(comboData.items.length === 1 && comboData.items[0].name.includes('Death Strike'),
+    `souvenir+Covert should return only Death Strike, got ${JSON.stringify(comboData.items.map((i) => i.name))}`);
 
   // Item cap: with MAX_ITEMS=5 the list is capped but every cross-listed
   // item survives the cut

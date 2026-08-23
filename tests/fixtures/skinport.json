@@ -84,6 +84,34 @@
     "updated_at": 1755130000
   },
   {
+    "market_hash_name": "Souvenir AWP | Safari Mesh (Field-Tested)",
+    "currency": "USD",
+    "suggested_price": null,
+    "item_page": "https://skinport.com/item/souvenir-awp-safari-mesh-field-tested",
+    "market_page": "https://skinport.com/market?item=Safari+Mesh&cat=AWP",
+    "min_price": 4.2,
+    "max_price": 12.0,
+    "mean_price": 7.8,
+    "median_price": 7.1,
+    "quantity": 14,
+    "created_at": 1535988253,
+    "updated_at": 1755130000
+  },
+  {
+    "market_hash_name": "Souvenir SSG 08 | Death Strike (Minimal Wear)",
+    "currency": "USD",
+    "suggested_price": 24.0,
+    "item_page": "https://skinport.com/item/souvenir-ssg-08-death-strike-minimal-wear",
+    "market_page": "https://skinport.com/market?item=Death+Strike&cat=SSG+08",
+    "min_price": 21.5,
+    "max_price": 30.0,
+    "mean_price": 24.9,
+    "median_price": 24.0,
+    "quantity": 8,
+    "created_at": 1535988253,
+    "updated_at": 1755130000
+  },
+  {
     "market_hash_name": "Tec-9 | Nuclear Threat (Minimal Wear)",
     "currency": "USD",
     "suggested_price": null,

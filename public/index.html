@@ -269,6 +269,13 @@
   <select id="rarity">
     <option value="">All rarities</option>
   </select>
+  <select id="type">
+    <option value="">Any type</option>
+    <option value="souvenir">Souvenir</option>
+    <option value="stattrak">StatTrak&trade;</option>
+    <option value="special">Knives and gloves</option>
+    <option value="normal">Normal</option>
+  </select>
   <select id="sort">
     <option value="discount">Sort: Discount</option>
     <option value="popularity">Sort: Popularity</option>
@@ -459,16 +466,21 @@ async function load() {
   // AbortController + setTimeout works on every browser, unlike AbortSignal.timeout
   const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const abortTimer = ctrl ? setTimeout(() => ctrl.abort(), 75000) : null;
-  // Rarity filters on the server over the full merged list, so a filtered
-  // view is as deep as the unfiltered one
+  // Rarity and type filter on the server over the full merged list, so a
+  // filtered view is as deep as the unfiltered one
   const rarityValue = document.getElementById('rarity').value;
-  const url = '/api/deals' + (rarityValue ? '?rarity=' + encodeURIComponent(rarityValue) : '');
+  const typeValue = document.getElementById('type').value;
+  const params = [];
+  if (rarityValue) params.push('rarity=' + encodeURIComponent(rarityValue));
+  if (typeValue) params.push('type=' + encodeURIComponent(typeValue));
+  const url = '/api/deals' + (params.length ? '?' + params.join('&') : '');
   try {
     const res = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
     if (!res.ok) throw new Error('bad response');
     const data = await res.json();
     allItems = data.items || [];
     populateRarityFilter(data.rarityCounts);
+    populateTypeCounts(data.typeCounts);
     setStatus(data);
     render();
     const anyUp = Object.values(data.sources).some(s => s.enabled !== false && s.ok);
@@ -516,6 +528,21 @@ document.getElementById('rarity').addEventListener('input', function () {
   visibleCount = PAGE_SIZE;
   load();
 });
+document.getElementById('type').addEventListener('input', function () {
+  visibleCount = PAGE_SIZE;
+  load();
+});
+
+const TYPE_LABELS = { souvenir: 'Souvenir', stattrak: 'StatTrak™', special: 'Knives and gloves', normal: 'Normal' };
+function populateTypeCounts(counts) {
+  if (!counts) return;
+  const sel = document.getElementById('type');
+  for (const opt of sel.options) {
+    if (!opt.value) continue;
+    const n = counts[opt.value] || 0;
+    opt.textContent = `${TYPE_LABELS[opt.value]} (${n})`;
+  }
+}
 document.getElementById('more').addEventListener('click', function () {
   visibleCount += PAGE_SIZE;
   render();

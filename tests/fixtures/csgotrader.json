@@ -15,6 +15,10 @@
     "steam": { "last_24h": 1400.0, "last_7d": 1392.5, "last_30d": 1385.0, "last_90d": 1360.0 },
     "buff163": { "starting_at": { "price": 1380.0 }, "highest_order": { "price": 1290.0 } }
   },
+  "Souvenir AWP | Safari Mesh (Field-Tested)": {
+    "steam": { "last_24h": 9.8, "last_7d": 9.4, "last_30d": 9.1, "last_90d": 8.7 },
+    "buff163": { "starting_at": { "price": 10.5 }, "highest_order": { "price": 8.2 } }
+  },
   "M4A1-S | Hyper Beast (Minimal Wear)": {
     "steam": { "last_24h": 31.5, "last_7d": 31.0, "last_30d": 30.6, "last_90d": 29.8 },
     "buff163": { "starting_at": { "price": 30.9 }, "highest_order": { "price": 27.5 } }
